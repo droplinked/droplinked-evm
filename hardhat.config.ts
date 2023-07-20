@@ -9,6 +9,12 @@ const config: HardhatUserConfig = {
     polygon_mumbai: {
       url: "https://rpc-mumbai.maticvigil.com",
       accounts: [process.env.PRIVATE_KEY as string]
+    },
+    binance_testnet:{
+      url: "https://data-seed-prebsc-1-s1.binance.org:8545",
+      chainId: 97,
+      gasPrice: 20000000000,
+      accounts: [process.env.MNEMONIC as string]
     }
   },
   solidity: {

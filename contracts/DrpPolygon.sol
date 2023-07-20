@@ -122,7 +122,7 @@ contract Droplinked is ERC1155{
         // Using price feed of chainlink to get the price of MATIC/USD without external source or centralization
         // Binance : 0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526
         // Polygon : 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
-        priceFeed = AggregatorV3Interface(0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526);
+        priceFeed = AggregatorV3Interface(0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada);
     }
 
     function setHeartBeat(uint16 _heartbeat) public {
