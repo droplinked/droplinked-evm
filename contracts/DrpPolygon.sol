@@ -5,11 +5,20 @@ import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
-contract Droplinked is ERC1155 {
-    AggregatorV3Interface internal immutable priceFeed;
+interface IPaymentContract{
+    function batchPay(address[] memory _recipients, uint256[] memory _amounts) external payable;
+}
 
-    // HeartBeat is used to check if the price is updated or not (in seconds)
-    uint16 heartBeat = 120;
+contract Droplinked is ERC1155 {
+
+    IPaymentContract internal immutable paymentContract;
+    // Using price feed of chainlink to get the price of MATIC/USD without external source or centralization
+    // Binance : 0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526
+    // Polygon : 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
+    AggregatorV3Interface internal immutable priceFeed = AggregatorV3Interface(0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526);
+
+    // The heartbeat is the time that the pricefeed is updated(2 minutes)
+    uint16 public heartBeat = 120;
 
     error oldPrice();
 
@@ -25,7 +34,7 @@ contract Droplinked is ERC1155 {
     // AccessDenied indicates you want to do a operation (CancelRequest or Accept) that you are not allowed to do
     error AccessDenied();
 
-    // AlreadyRequested indicates that you have already requested for the token_id you are trying to request to again
+    // AlreadyRequested indicates that you have already requested for the tokenId you are trying to request to again
     error AlreadyRequested();
 
     // RequestNotfound is thrown when the caller is not the person that is needed to accept the request
@@ -35,19 +44,19 @@ contract Droplinked is ERC1155 {
     error RequestIsAccepted();
 
     // The Mint would be emitted on Minting new product
-    event Mint_event(uint token_id, address recipient, uint amount);
+    event Mint_event(uint tokenId, address recipient, uint amount);
 
     // PublishRequest would be emitted when a new publish request is made
-    event PulishRequest(uint token_id, uint request_id);
+    event PulishRequest(uint tokenId, uint requestId);
 
     // AcceptRequest would be emitted when the `approve_request` function is called
-    event AcceptRequest(uint request_id);
+    event AcceptRequest(uint requestId);
 
     // Cancelequest would be emitted when the `cancel_request` function is called
-    event CancelRequest(uint request_id);
+    event CancelRequest(uint requestId);
 
     // DisapproveRequest would be emitted when the `disapprove` function is called
-    event DisapproveRequest(uint request_id);
+    event DisapproveRequest(uint requestId);
 
     // DirectBuy would be emitted when the `direct_buy` function is called and the transfer is successful
     event DirectBuy(uint price, address from, address to);
@@ -55,7 +64,7 @@ contract Droplinked is ERC1155 {
     // RecordedBuy would be emitted when the `buy_recorded` function is called and the transfers are successful
     event RecordedBuy(
         address producer,
-        uint token_id,
+        uint tokenId,
         uint shipping,
         uint tax,
         uint amount,
@@ -64,7 +73,7 @@ contract Droplinked is ERC1155 {
 
     // AffiliateBuy would be emitted when the `buy_affiliate` function is called and the transfers are successful
     event AffiliateBuy(
-        uint request_id,
+        uint requestId,
         uint amount,
         uint shipping,
         uint tax,
@@ -84,32 +93,29 @@ contract Droplinked is ERC1155 {
 
     // Request struct
     struct Request {
-        uint token_id;
+        uint tokenId;
         address producer;
         address publisher;
         bool accepted;
     }
 
     // TokenID => ItsTotalSupply
-    mapping(uint => uint) token_cnts;
+    mapping(uint => uint) tokenCnts;
 
     // Keeps the record of the minted tokens
-    uint public token_cnt;
+    uint public tokenCnt;
 
     // Keeps the record of the requests made
-    uint public request_cnt;
+    uint public requestCnt;
 
-    // Keeps record of the total_supply of the contract
-    uint public total_supply;
+    // Keeps record of the totalSupply of the contract
+    uint public totalSupply;
 
     // The ratio Verifier for payment methods
     address public immutable owner;
 
     // The fee (*100) for Droplinked Account (ratioVerifier)
     uint public fee;
-
-    // HolderAddress => ( TokenID => AMOUNT ) Holders
-    mapping(address => mapping(uint => uint)) public holders;
 
     // TokenID => metadata
     mapping(uint => NFTMetadata) public metadatas;
@@ -121,31 +127,28 @@ contract Droplinked is ERC1155 {
     mapping(address => mapping(uint => bool)) public isRequested;
 
     // HashOfMetadata => TokenID
-    mapping(bytes32 => uint) public tokenid_by_hash;
+    mapping(bytes32 => uint) public tokenIdByHash;
 
     // PublisherAddress => ( RequestID => boolean )
-    mapping(address => mapping(uint => bool)) public publishers_requests;
+    mapping(address => mapping(uint => bool)) public publishersRequests;
 
     // ProducerAddress => ( RequestID => boolean )
-    mapping(address => mapping(uint => bool)) public producer_requests;
+    mapping(address => mapping(uint => bool)) public producerRequests;
 
     // TokenID => string URI
     mapping(uint => string) uris;
 
+    mapping(uint256 => mapping(address => uint256)) private holders;
+
     modifier onlyOwner() {
-        if(msg.sender != owner) revert AccessDenied();
+        if (msg.sender != owner) revert AccessDenied();
         _;
     }
 
-    constructor(uint _fee) ERC1155("") {
-        fee = _fee;
+    constructor(address _paymentContract) ERC1155("") {
+        fee = 100;
         owner = msg.sender;
-        // Using price feed of chainlink to get the price of MATIC/USD without external source or centralization
-        // Binance : 0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526
-        // Polygon : 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
-        priceFeed = AggregatorV3Interface(
-            0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
-        );
+        paymentContract = IPaymentContract(_paymentContract);
     }
 
     function setHeartBeat(uint16 _heartbeat) public onlyOwner {
@@ -153,7 +156,7 @@ contract Droplinked is ERC1155 {
         emit HeartBeatUpdated(_heartbeat);
     }
 
-    function setFee(uint _fee) public onlyOwner{
+    function setFee(uint _fee) public onlyOwner {
         fee = _fee;
         emit FeeUpdated(_fee);
     }
@@ -167,9 +170,9 @@ contract Droplinked is ERC1155 {
     }
 
     function uri(
-        uint256 token_id
+        uint256 tokenId
     ) public view virtual override returns (string memory) {
-        return uris[token_id];
+        return uris[tokenId];
     }
 
     function mint(
@@ -180,47 +183,47 @@ contract Droplinked is ERC1155 {
     ) public {
         // Calculate the metadataHash using its IPFS uri, price, and comission
         bytes32 metadata_hash = keccak256(abi.encode(_uri, _price, _comission));
-        // Get the TokenID from `tokenid_by_hash` by its calculated hash
-        uint token_id = tokenid_by_hash[metadata_hash];
+        // Get the TokenID from `tokenIdByHash` by its calculated hash
+        uint tokenId = tokenIdByHash[metadata_hash];
         // If NOT FOUND
-        if (token_id == 0) {
+        if (tokenId == 0) {
             // Create a new tokenID
-            token_id = token_cnt + 1;
-            token_cnt++;
-            metadatas[token_id].ipfsUrl = _uri;
-            metadatas[token_id].price = _price;
-            metadatas[token_id].comission = _comission;
-            holders[msg.sender][token_id] = amount;
-            tokenid_by_hash[metadata_hash] = token_id;
+            tokenId = tokenCnt + 1;
+            tokenCnt++;
+            metadatas[tokenId].ipfsUrl = _uri;
+            metadatas[tokenId].price = _price;
+            metadatas[tokenId].comission = _comission;
+            holders[tokenId][msg.sender] = amount;
+            tokenIdByHash[metadata_hash] = tokenId;
         }
         // If FOUND
         else {
-            // Update the old token_ids amount
-            holders[msg.sender][token_id] += amount;
+            // Update the old tokenIds amount
+            holders[tokenId][msg.sender] += amount;
         }
-        total_supply += amount;
-        token_cnts[token_id] += amount;
-        _mint(msg.sender, token_id, amount, "");
-        uris[token_id] = _uri;
-        emit URI(_uri, token_id);
-        emit Mint_event(token_id, msg.sender, amount);
+        totalSupply += amount;
+        tokenCnts[tokenId] += amount;
+        _mint(msg.sender, tokenId, amount, "");
+        uris[tokenId] = _uri;
+        emit URI(_uri, tokenId);
+        emit Mint_event(tokenId, msg.sender, amount);
     }
 
-    function publish_request(address producer_account, uint token_id) public {
-        if (isRequested[producer_account][token_id]) revert AlreadyRequested();
-        // Create a new request_id
-        uint request_id = request_cnt + 1;
+    function publish_request(address producer_account, uint tokenId) public {
+        if (isRequested[producer_account][tokenId]) revert AlreadyRequested();
+        // Create a new requestId
+        uint requestId = requestCnt + 1;
         // Update the requests_cnt
-        request_cnt++;
+        requestCnt++;
         // Create the request and add it to producer's incoming reqs, and publishers outgoing reqs
-        requests[request_id].token_id = token_id;
-        requests[request_id].producer = producer_account;
-        requests[request_id].publisher = msg.sender;
-        requests[request_id].accepted = false;
-        publishers_requests[msg.sender][request_id] = true;
-        producer_requests[producer_account][request_id] = true;
-        isRequested[producer_account][token_id] = true;
-        emit PulishRequest(token_id, request_id);
+        requests[requestId].tokenId = tokenId;
+        requests[requestId].producer = producer_account;
+        requests[requestId].publisher = msg.sender;
+        requests[requestId].accepted = false;
+        publishersRequests[msg.sender][requestId] = true;
+        producerRequests[producer_account][requestId] = true;
+        isRequested[producer_account][tokenId] = true;
+        emit PulishRequest(tokenId, requestId);
     }
 
     // The overloading of the safeBatchTransferFrom from ERC1155 to update contract variables
@@ -239,8 +242,8 @@ contract Droplinked is ERC1155 {
         for (uint256 i = 0; i < ids.length; ++i) {
             uint256 id = ids[i];
             uint256 amount = amounts[i];
-            holders[from][id] -= amount;
-            holders[to][id] += amount;
+            holders[id][from] -= amount;
+            holders[id][to] += amount;
         }
     }
 
@@ -257,42 +260,41 @@ contract Droplinked is ERC1155 {
             "ERC1155: caller is not token owner or approved"
         );
         _safeTransferFrom(from, to, id, amount, data);
-        holders[from][id] -= amount;
-        holders[to][id] += amount;
+        holders[id][from] -= amount;
+        holders[id][to] += amount;
     }
 
-    function approve_request(uint request_id) public {
-        if (!producer_requests[msg.sender][request_id])
-            revert RequestNotfound();
-        requests[request_id].accepted = true;
-        emit AcceptRequest(request_id);
+    function approve_request(uint requestId) public {
+        if (!producerRequests[msg.sender][requestId]) revert RequestNotfound();
+        requests[requestId].accepted = true;
+        emit AcceptRequest(requestId);
     }
 
-    function cancel_request(uint request_id) public {
-        if (msg.sender != requests[request_id].publisher) revert AccessDenied();
-        if (requests[request_id].accepted) revert RequestIsAccepted();
+    function cancel_request(uint requestId) public {
+        if (msg.sender != requests[requestId].publisher) revert AccessDenied();
+        if (requests[requestId].accepted) revert RequestIsAccepted();
         // remove the request from producer's incoming requests, and from publisher's outgoing requests
-        producer_requests[requests[request_id].producer][request_id] = false;
-        publishers_requests[msg.sender][request_id] = false;
+        producerRequests[requests[requestId].producer][requestId] = false;
+        publishersRequests[msg.sender][requestId] = false;
         // Also set the isRequested to false since we deleted the request
-        isRequested[requests[request_id].producer][
-            requests[request_id].token_id
+        isRequested[requests[requestId].producer][
+            requests[requestId].tokenId
         ] = false;
-        emit CancelRequest(request_id);
+        emit CancelRequest(requestId);
     }
 
-    function disapprove(uint request_id) public {
-        if (msg.sender != requests[request_id].producer) revert AccessDenied();
+    function disapprove(uint requestId) public {
+        if (msg.sender != requests[requestId].producer) revert AccessDenied();
         // remove the request from producer's incoming requests, and from publisher's outgoing requests
-        producer_requests[msg.sender][request_id] = false;
-        publishers_requests[requests[request_id].publisher][request_id] = false;
+        producerRequests[msg.sender][requestId] = false;
+        publishersRequests[requests[requestId].publisher][requestId] = false;
         // Also set the isRequested to false since we deleted the request
-        isRequested[requests[request_id].producer][
-            requests[request_id].token_id
+        isRequested[requests[requestId].producer][
+            requests[requestId].tokenId
         ] = false;
         // And set the `accepted` property of the request to false
-        requests[request_id].accepted = false;
-        emit DisapproveRequest(request_id);
+        requests[requestId].accepted = false;
+        emit DisapproveRequest(requestId);
     }
 
     function direct_buy(
@@ -312,23 +314,30 @@ contract Droplinked is ERC1155 {
         uint droplinkedShare = (totalAmount * fee) / 1e4;
         // check if the sended amount is more than the needed
         if (msg.value < totalAmount) revert NotEnoughBalance();
-        // Transfer money & checks
-        (bool t, ) = payable(owner).call{value: droplinkedShare}("");
-        if (!t) revert WeiTransferFailed("droplinked transfer");
-        (t, ) = payable(recipient).call{value: (totalAmount)}("");
-        if (!t) revert WeiTransferFailed("recipient transfer");
         emit DirectBuy(price, msg.sender, recipient);
+        // Transfer money & checks
+
+        address[] memory recivers = new address[](2);
+        recivers[0] = owner;
+        recivers[1] = recipient;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = droplinkedShare;
+        amounts[1] = totalAmount - droplinkedShare;
+        paymentContract.batchPay{value: msg.value}(
+            recivers,
+            amounts
+        );
     }
 
     function buy_recorded(
         address producer,
-        uint token_id,
+        uint tokenId,
         uint shipping,
         uint tax,
         uint amount,
         uint80 roundId
     ) public payable {
-        if (holders[producer][token_id] < amount) revert NotEnoughtTokens();
+        if (holders[tokenId][producer] < amount) revert NotEnoughtTokens();
         // Calculations
         (uint ratio, uint timestamp) = getLatestPrice(roundId);
         // check the timestamp
@@ -336,66 +345,84 @@ contract Droplinked is ERC1155 {
             block.timestamp > timestamp &&
             block.timestamp - timestamp > 2 * heartBeat
         ) revert oldPrice();
-        uint product_price = (amount * metadatas[token_id].price * 1e24) /
-            ratio;
+        uint product_price = (amount * metadatas[tokenId].price * 1e24) / ratio;
         uint totalPrice = product_price + (((shipping + tax) * 1e24) / ratio);
         if (msg.value < totalPrice) revert NotEnoughBalance();
         uint droplinked_share = (product_price * fee) / 1e4;
         uint producer_share = totalPrice - droplinked_share;
         // Transfer the product on the contract state
-        holders[msg.sender][token_id] += amount;
-        holders[producer][token_id] -= amount;
-        emit RecordedBuy(producer, token_id, shipping, tax, amount, msg.sender);
+        holders[tokenId][msg.sender] += amount;
+        holders[tokenId][producer] -= amount;
+        emit RecordedBuy(producer, tokenId, shipping, tax, amount, msg.sender);
         // Actual money transfers & checks
-        (bool result, ) = payable(owner).call{value: droplinked_share}("");
-        if (!result) revert WeiTransferFailed("droplinked transfer");
-        (result, ) = payable(producer).call{value: producer_share}("");
-        if (!result) revert WeiTransferFailed("producer transfer");
+        address[] memory recivers = new address[](2);
+        recivers[0] = owner;
+        recivers[1] = producer;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = droplinked_share;
+        amounts[1] = producer_share;
+        paymentContract.batchPay{value: msg.value}(
+            recivers,
+            amounts
+        );
     }
 
     function buy_affiliate(
-        uint request_id,
+        uint requestId,
         uint amount,
         uint shipping,
         uint tax,
         uint80 roundId
     ) public payable {
         // checks and calculations
-        address prod = requests[request_id].producer;
-        address publ = requests[request_id].publisher;
-        uint token_id = requests[request_id].token_id;
+        address prod = requests[requestId].producer;
+        address publ = requests[requestId].publisher;
+        uint tokenId = requests[requestId].tokenId;
         (uint ratio, uint timestamp) = getLatestPrice(roundId);
         // check the timestamp
         if (
             block.timestamp > timestamp &&
             block.timestamp - timestamp > 2 * heartBeat
         ) revert oldPrice();
-        uint product_price = (amount * metadatas[token_id].price * 1e24) /
-            ratio;
+        uint product_price = (amount * metadatas[tokenId].price * 1e24) / ratio;
         uint total_amount = product_price + (((shipping + tax) * 1e24) / ratio);
         if (msg.value < total_amount) revert NotEnoughBalance();
 
-        if (holders[prod][token_id] < amount) revert NotEnoughtTokens();
+        if (holders[tokenId][prod] < amount) revert NotEnoughtTokens();
         uint droplinked_share = (product_price * fee) / 1e4;
         uint publisher_share = ((product_price - droplinked_share) *
-            metadatas[token_id].comission) / 1e4;
+            metadatas[tokenId].comission) / 1e4;
         uint producer_share = total_amount -
             (droplinked_share + publisher_share);
         // Transfer on contract
-        holders[msg.sender][token_id] += amount;
-        holders[prod][token_id] -= amount;
-        emit AffiliateBuy(request_id, amount, shipping, tax, msg.sender);
+        holders[tokenId][msg.sender] += amount;
+        holders[tokenId][prod] -= amount;
+        emit AffiliateBuy(requestId, amount, shipping, tax, msg.sender);
         // Money transfer
-        (bool result, ) = payable(owner).call{value: droplinked_share}("");
-        if (!result) revert WeiTransferFailed("droplinked transfer");
-        (result, ) = payable(prod).call{value: producer_share}("");
-        if (!result) revert WeiTransferFailed("producer transfer");
-        (result, ) = payable(publ).call{value: publisher_share}("");
-        if (!result) revert WeiTransferFailed("publisher transfer");
+        address[] memory recivers = new address[](3);
+        recivers[0] = owner;
+        recivers[1] = prod;
+        recivers[2] = publ;
+        uint256[] memory amounts = new uint256[](3);
+        amounts[0] = droplinked_share;
+        amounts[1] = producer_share;
+        amounts[2] = publisher_share;
+        paymentContract.batchPay{value: msg.value}(
+            recivers,
+            amounts
+        );
     }
 
     // Returns the totalSupply of the contract
-    function totalSupply(uint256 id) public view returns (uint256) {
-        return token_cnts[id];
+    function totalSupplyOf(uint256 id) public view returns (uint256) {
+        return tokenCnts[id];
+    }
+
+    // Returns the balance of the address for the tokenId
+    function balanceOf(
+        address account,
+        uint256 id
+    ) public view override returns (uint256) {
+        return holders[id][account];
     }
 }

@@ -15,7 +15,16 @@ const config: HardhatUserConfig = {
       chainId: 97,
       gasPrice: 20000000000,
       accounts: [process.env.MNEMONIC as string]
-    }
+    },
+    HederaTest: {
+      //HashIO testnet endpoint from the TESTNET_ENDPOINT variable in the project .env the file
+      url: process.env.HEDERA_TESTNET_ENDPOINT,
+      //the Hedera testnet account ECDSA private
+      //the public address for the account is derived from the private key
+      accounts: [
+        process.env.HEDERA_TESTNET_OPERATOR_PRIVATE_KEY as string,
+      ],
+    },
   },
   solidity: {
     version: "0.8.19",
@@ -27,7 +36,7 @@ const config: HardhatUserConfig = {
     }
   },
   etherscan:{
-    apiKey: (process.env.POLYGONSCAN_API_KEY) as string
+    apiKey: (process.env.BINANCE_API_KEY) as string
   }
 };
 
