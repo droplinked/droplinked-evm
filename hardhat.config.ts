@@ -25,6 +25,14 @@ const config: HardhatUserConfig = {
         process.env.HEDERA_TESTNET_OPERATOR_PRIVATE_KEY as string,
       ],
     },
+    XRPSideChain : {
+      url: process.env.XRP_TESTNET_ENDPOINT,
+      //the Hedera testnet account ECDSA private
+      //the public address for the account is derived from the private key
+      accounts: [
+        process.env.XRP_TESTNET_OPERATOR_PRIVATE_KEY as string,
+      ],
+    }
   },
   solidity: {
     version: "0.8.19",
@@ -36,7 +44,7 @@ const config: HardhatUserConfig = {
     }
   },
   etherscan:{
-    apiKey: (process.env.BINANCE_API_KEY) as string
+    apiKey: (process.env.POLYGONSCAN_API_KEY) as string
   }
 };
 

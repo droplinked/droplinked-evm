@@ -1,17 +1,25 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
 
-describe("Droplinked", function(){
+
+describe("DroplinkedSg", function(){
     async function deployContract() {
         const fee = 100;
         const [owner,producer,publisher,customer] = await ethers.getSigners();
         const Payment = await ethers.getContractFactory("DroplinkedPayment");
         const payment = await Payment.deploy();
-        const Droplinked = await ethers.getContractFactory("Droplinked");
-        const droplinked = await Droplinked.deploy(await payment.getAddress());
+        const Droplinked = await ethers.getContractFactory("DroplinkedSg");
+        const droplinked = await Droplinked.deploy(payment.getAddress());
         return {droplinked,owner,producer,publisher,customer,fee};
     }
 
+    function generateSignature(price : number, timestamp : number, contractAddress: string, privateKey: string) {
+        const message = ethers.solidityPackedKeccak256(
+            ["uint256", "uint256", "address"],
+            [price, timestamp, contractAddress]
+        );
+        
+    }
     describe("Deployment", function(){
         it("Should set the right owner", async function(){
             const {droplinked,owner} = await deployContract();
@@ -22,6 +30,7 @@ describe("Droplinked", function(){
             expect(await droplinked.fee()).to.equal(fee);
         });
     });
+    
 
     describe("Mint", function(){
         it("Should mint 2000 tokens", async function(){

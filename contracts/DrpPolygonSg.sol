@@ -4,6 +4,7 @@ pragma solidity ^0.8.18;
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 interface IPaymentContract {
     function batchPay(
@@ -12,7 +13,16 @@ interface IPaymentContract {
     ) external payable;
 }
 
-contract Droplinked is ERC1155 {
+contract DroplinkedPayment{
+    function batchPay(address[] memory _recipients, uint256[] memory _amounts) public payable{
+        require(_recipients.length == _amounts.length, "Invalid input");
+        for(uint256 i = 0; i < _recipients.length; i++){
+            payable(_recipients[i]).transfer(_amounts[i]); 
+        }
+    }
+} 
+
+contract DroplinkedSg is ERC1155 {
     IPaymentContract internal immutable paymentContract;
     // Using price feed of chainlink to get the price of MATIC/USD without external source or centralization
     // Binance : 0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526
@@ -23,7 +33,7 @@ contract Droplinked is ERC1155 {
     // HeartBeat is used to check if the price is updated or not (in seconds)
     // Polygon : 120
     // Binance : 3600
-    uint16 public heartBeat = 3600;
+    uint16 public heartBeat = 120;
 
     error oldPrice();
 
@@ -49,56 +59,56 @@ contract Droplinked is ERC1155 {
     error RequestIsAccepted();
 
     // The Mint would be emitted on Minting new product
-    event Mint_event(uint tokenId, address recipient, uint amount);
+    event Mint_event(uint256 tokenId, address recipient, uint256 amount);
 
     // PublishRequest would be emitted when a new publish request is made
-    event PulishRequest(uint tokenId, uint requestId);
+    event PulishRequest(uint256 tokenId, uint256 requestId);
 
     // AcceptRequest would be emitted when the `approve_request` function is called
-    event AcceptRequest(uint requestId);
+    event AcceptRequest(uint256 requestId);
 
     // Cancelequest would be emitted when the `cancel_request` function is called
-    event CancelRequest(uint requestId);
+    event CancelRequest(uint256 requestId);
 
     // DisapproveRequest would be emitted when the `disapprove` function is called
-    event DisapproveRequest(uint requestId);
+    event DisapproveRequest(uint256 requestId);
 
     // DirectBuy would be emitted when the `direct_buy` function is called and the transfer is successful
-    event DirectBuy(uint price, address from, address to);
+    event DirectBuy(uint256 price, address from, address to);
 
     // RecordedBuy would be emitted when the `buy_recorded` function is called and the transfers are successful
     event RecordedBuy(
         address producer,
-        uint tokenId,
-        uint shipping,
-        uint tax,
-        uint amount,
+        uint256 tokenId,
+        uint256 shipping,
+        uint256 tax,
+        uint256 amount,
         address buyer
     );
 
     // AffiliateBuy would be emitted when the `buy_affiliate` function is called and the transfers are successful
     event AffiliateBuy(
-        uint requestId,
-        uint amount,
-        uint shipping,
-        uint tax,
+        uint256 requestId,
+        uint256 amount,
+        uint256 shipping,
+        uint256 tax,
         address buyer
     );
 
     event HeartBeatUpdated(uint16 newHeartBeat);
 
-    event FeeUpdated(uint newFee);
+    event FeeUpdated(uint256 newFee);
 
     // NFTMetadata Struct
     struct NFTMetadata {
         string ipfsUrl;
-        uint price;
-        uint comission;
+        uint256 price;
+        uint256 comission;
     }
 
     // Request struct
     struct Request {
-        uint tokenId;
+        uint256 tokenId;
         address producer;
         address publisher;
         bool accepted;
@@ -122,45 +132,49 @@ contract Droplinked is ERC1155 {
         address producer;
     }
 
+
     // TokenID => ItsTotalSupply
-    mapping(uint => uint) tokenCnts;
+    mapping(uint256 => uint256) tokenCnts;
 
     // Keeps the record of the minted tokens
-    uint public tokenCnt;
+    uint256 public tokenCnt;
 
     // Keeps the record of the requests made
-    uint public requestCnt;
+    uint256 public requestCnt;
 
     // Keeps record of the totalSupply of the contract
-    uint public totalSupply;
+    uint256 public totalSupply;
 
     // The ratio Verifier for payment methods
     address public immutable owner;
 
     // The fee (*100) for Droplinked Account (ratioVerifier)
-    uint public fee;
+    uint256 public fee;
+
+    // The signer for Droplinked Account
+    address public immutable signer = 0xe74CFa92DB1c8863c0103CC10cF363008348098c;
 
     // TokenID => metadata
-    mapping(uint => NFTMetadata) public metadatas;
+    mapping(uint256 => NFTMetadata) public metadatas;
 
     // RequestID => Request
-    mapping(uint => Request) public requests;
+    mapping(uint256 => Request) public requests;
 
     // ProducerAddress => ( PublisherAddress => (TokenID => isRequested) )
-    mapping(address => mapping(address => mapping(uint => bool)))
+    mapping(address => mapping(address => mapping(uint256 => bool)))
         public isRequested;
 
     // HashOfMetadata => TokenID
-    mapping(bytes32 => uint) public tokenIdByHash;
+    mapping(bytes32 => uint256) public tokenIdByHash;
 
     // PublisherAddress => ( RequestID => boolean )
-    mapping(address => mapping(uint => bool)) public publishersRequests;
+    mapping(address => mapping(uint256 => bool)) public publishersRequests;
 
     // ProducerAddress => ( RequestID => boolean )
-    mapping(address => mapping(uint => bool)) public producerRequests;
+    mapping(address => mapping(uint256 => bool)) public producerRequests;
 
     // TokenID => string URI
-    mapping(uint => string) uris;
+    mapping(uint256 => string) uris;
 
     mapping(uint256 => mapping(address => uint256)) private holders;
 
@@ -183,17 +197,19 @@ contract Droplinked is ERC1155 {
         emit HeartBeatUpdated(_heartbeat);
     }
 
-    function setFee(uint _fee) public onlyOwner {
+    function setFee(uint256 _fee) public onlyOwner {
         fee = _fee;
         emit FeeUpdated(_fee);
     }
 
     // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
-    function getLatestPrice(uint80 roundId) public view returns (uint, uint) {
+    function getLatestPrice(
+        uint80 roundId
+    ) public view returns (uint256, uint256) {
         (, int256 price, , uint256 timestamp, ) = priceFeed.getRoundData(
             roundId
         );
-        return (uint(price), timestamp);
+        return (uint256(price), timestamp);
     }
 
     function uri(
@@ -204,14 +220,14 @@ contract Droplinked is ERC1155 {
 
     function mint(
         string calldata _uri,
-        uint _price,
-        uint _comission,
-        uint amount
+        uint256 _price,
+        uint256 _comission,
+        uint256 amount
     ) public {
         // Calculate the metadataHash using its IPFS uri, price, and comission
         bytes32 metadata_hash = keccak256(abi.encode(_uri, _price, _comission));
         // Get the TokenID from `tokenIdByHash` by its calculated hash
-        uint tokenId = tokenIdByHash[metadata_hash];
+        uint256 tokenId = tokenIdByHash[metadata_hash];
         // If NOT FOUND
         if (tokenId == 0) {
             // Create a new tokenID
@@ -236,11 +252,11 @@ contract Droplinked is ERC1155 {
         emit Mint_event(tokenId, msg.sender, amount);
     }
 
-    function publish_request(address producer_account, uint tokenId) public {
+    function publish_request(address producer_account, uint256 tokenId) public {
         if (isRequested[producer_account][msg.sender][tokenId])
             revert AlreadyRequested();
         // Create a new requestId
-        uint requestId = requestCnt + 1;
+        uint256 requestId = requestCnt + 1;
         // Update the requests_cnt
         requestCnt++;
         // Create the request and add it to producer's incoming reqs, and publishers outgoing reqs
@@ -292,13 +308,13 @@ contract Droplinked is ERC1155 {
         holders[id][to] += amount;
     }
 
-    function approve_request(uint requestId) public {
+    function approve_request(uint256 requestId) public {
         if (!producerRequests[msg.sender][requestId]) revert RequestNotfound();
         requests[requestId].accepted = true;
         emit AcceptRequest(requestId);
     }
 
-    function cancel_request(uint requestId) public {
+    function cancel_request(uint256 requestId) public {
         if (msg.sender != requests[requestId].publisher) revert AccessDenied();
         if (requests[requestId].accepted) revert RequestIsAccepted();
         // remove the request from producer's incoming requests, and from publisher's outgoing requests
@@ -311,7 +327,7 @@ contract Droplinked is ERC1155 {
         emit CancelRequest(requestId);
     }
 
-    function disapprove(uint requestId) public {
+    function disapprove(uint256 requestId) public {
         if (msg.sender != requests[requestId].producer) revert AccessDenied();
         // remove the request from producer's incoming requests, and from publisher's outgoing requests
         producerRequests[msg.sender][requestId] = false;
@@ -324,17 +340,21 @@ contract Droplinked is ERC1155 {
         requests[requestId].accepted = false;
         emit DisapproveRequest(requestId);
     }
+
     bool private isInPayment = false;
     function buy_batch(
         BuyItem[] calldata items,
-        uint80 roundId
+        uint256 latestAnswer,
+        uint256 timestamp,
+        bytes memory signature
     ) public payable {
         if(isInPayment){
             return;
         }
         isInPayment = true;
         if (items.length > 20) revert(); //todo
-        (uint ratio, uint timestamp) = getLatestPrice(roundId);
+        if (ECDSA.recover(ECDSA.toEthSignedMessageHash(keccak256(abi.encodePacked(latestAnswer, timestamp, address(this)))), signature) != signer)
+            revert AccessDenied();
         if (
             block.timestamp > timestamp &&
             block.timestamp - timestamp > 2 * heartBeat
@@ -347,7 +367,7 @@ contract Droplinked is ERC1155 {
             if (items[i].itemType == ItemType.Direct) {
                 uint price = items[i].price;
                 address recipient = items[i].recipient;
-                uint totalAmount = (price * 1e24) / ratio;
+                uint totalAmount = (price * 1e24) / latestAnswer;
                 uint droplinkedShare = (totalAmount * fee) / 1e4;
                 if (msg.value < totalAmount) revert NotEnoughBalance();
                 emit DirectBuy(price, msg.sender, recipient);
@@ -363,9 +383,9 @@ contract Droplinked is ERC1155 {
                 address producer = items[i].producer;
                 uint product_price = (amount *
                     metadatas[tokenId].price *
-                    1e24) / ratio;
+                    1e24) / latestAnswer;
                 uint totalPrice = product_price +
-                    (((shipping + tax) * 1e24) / ratio);
+                    (((shipping + tax) * 1e24) / latestAnswer);
                 if (msg.value < totalPrice) revert NotEnoughBalance();
                 uint droplinked_share = (product_price * fee) / 1e4;
                 uint producer_share = totalPrice - droplinked_share;
@@ -393,9 +413,9 @@ contract Droplinked is ERC1155 {
                 uint tokenId = requests[requestId].tokenId;
                 uint product_price = (amount *
                     metadatas[tokenId].price *
-                    1e24) / ratio;
+                    1e24) / latestAnswer;
                 uint total_amount = product_price +
-                    (((shipping + tax) * 1e24) / ratio);
+                    (((shipping + tax) * 1e24) / latestAnswer);
                 if (msg.value < total_amount) revert NotEnoughBalance();
                 if (holders[tokenId][prod] < amount) revert NotEnoughtTokens();
                 uint droplinked_share = (product_price * fee) / 1e4;
@@ -421,25 +441,27 @@ contract Droplinked is ERC1155 {
     }
 
     function direct_buy(
-        uint price,
+        uint256 price,
         address recipient,
-        uint80 roundId
-    ) public payable {
-        // Get timestamp from roundId and check if its less than 2 heartbeats passed
+        uint256 latestAnswer,
+        uint256 timestamp,
+        bytes memory signature
+    ) public payable{
+        if (ECDSA.recover(ECDSA.toEthSignedMessageHash(keccak256(abi.encodePacked(latestAnswer, timestamp, address(this)))), signature) != signer)
+            revert AccessDenied();
+
         // Calculations
-        (uint ratio, uint timestamp) = getLatestPrice(roundId);
         // check the timestamp
         if (
             block.timestamp > timestamp &&
             block.timestamp - timestamp > 2 * heartBeat
         ) revert oldPrice();
-        uint totalAmount = (price * 1e24) / ratio;
-        uint droplinkedShare = (totalAmount * fee) / 1e4;
+        uint256 totalAmount = (price * 1e24) / latestAnswer;
+        uint256 droplinkedShare = (totalAmount * fee) / 1e4;
         // check if the sended amount is more than the needed
         if (msg.value < totalAmount) revert NotEnoughBalance();
         emit DirectBuy(price, msg.sender, recipient);
         // Transfer money & checks
-
         address[] memory recivers = new address[](2);
         recivers[0] = owner;
         recivers[1] = recipient;
@@ -451,25 +473,30 @@ contract Droplinked is ERC1155 {
 
     function buy_recorded(
         address producer,
-        uint tokenId,
-        uint shipping,
-        uint tax,
-        uint amount,
-        uint80 roundId
+        uint256 tokenId,
+        uint256 shipping,
+        uint256 tax,
+        uint256 amount,
+        uint256 latestAnswer,
+        uint256 timestamp,
+        bytes memory signature
     ) public payable {
+        if (ECDSA.recover(ECDSA.toEthSignedMessageHash(keccak256(abi.encodePacked(latestAnswer, timestamp, address(this)))), signature) != signer)
+            revert AccessDenied();
         if (holders[tokenId][producer] < amount) revert NotEnoughtTokens();
         // Calculations
-        (uint ratio, uint timestamp) = getLatestPrice(roundId);
         // check the timestamp
         if (
             block.timestamp > timestamp &&
             block.timestamp - timestamp > 2 * heartBeat
         ) revert oldPrice();
-        uint product_price = (amount * metadatas[tokenId].price * 1e24) / ratio;
-        uint totalPrice = product_price + (((shipping + tax) * 1e24) / ratio);
+        uint256 product_price = (amount * metadatas[tokenId].price * 1e24) /
+            latestAnswer;
+        uint256 totalPrice = product_price +
+            (((shipping + tax) * 1e24) / latestAnswer);
         if (msg.value < totalPrice) revert NotEnoughBalance();
-        uint droplinked_share = (product_price * fee) / 1e4;
-        uint producer_share = totalPrice - droplinked_share;
+        uint256 droplinked_share = (product_price * fee) / 1e4;
+        uint256 producer_share = totalPrice - droplinked_share;
         // Transfer the product on the contract state
         holders[tokenId][msg.sender] += amount;
         holders[tokenId][producer] -= amount;
@@ -485,31 +512,36 @@ contract Droplinked is ERC1155 {
     }
 
     function buy_affiliate(
-        uint requestId,
-        uint amount,
-        uint shipping,
-        uint tax,
-        uint80 roundId
+        uint256 requestId,
+        uint256 amount,
+        uint256 shipping,
+        uint256 tax,
+        uint256 latestAnswer,
+        uint256 timestamp,
+        bytes memory signature
     ) public payable {
+        if (ECDSA.recover(ECDSA.toEthSignedMessageHash(keccak256(abi.encodePacked(latestAnswer, timestamp, address(this)))), signature) != signer)
+            revert AccessDenied();
         // checks and calculations
         address prod = requests[requestId].producer;
         address publ = requests[requestId].publisher;
-        uint tokenId = requests[requestId].tokenId;
-        (uint ratio, uint timestamp) = getLatestPrice(roundId);
+        uint256 tokenId = requests[requestId].tokenId;
         // check the timestamp
         if (
             block.timestamp > timestamp &&
             block.timestamp - timestamp > 2 * heartBeat
         ) revert oldPrice();
-        uint product_price = (amount * metadatas[tokenId].price * 1e24) / ratio;
-        uint total_amount = product_price + (((shipping + tax) * 1e24) / ratio);
+        uint256 product_price = (amount * metadatas[tokenId].price * 1e24) /
+            latestAnswer;
+        uint256 total_amount = product_price +
+            (((shipping + tax) * 1e24) / latestAnswer);
         if (msg.value < total_amount) revert NotEnoughBalance();
 
         if (holders[tokenId][prod] < amount) revert NotEnoughtTokens();
-        uint droplinked_share = (product_price * fee) / 1e4;
-        uint publisher_share = ((product_price - droplinked_share) *
+        uint256 droplinked_share = (product_price * fee) / 1e4;
+        uint256 publisher_share = ((product_price - droplinked_share) *
             metadatas[tokenId].comission) / 1e4;
-        uint producer_share = total_amount -
+        uint256 producer_share = total_amount -
             (droplinked_share + publisher_share);
         // Transfer on contract
         holders[tokenId][msg.sender] += amount;
