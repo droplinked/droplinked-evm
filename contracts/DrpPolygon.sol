@@ -325,6 +325,7 @@ contract Droplinked is ERC1155 {
         emit DisapproveRequest(requestId);
     }
     bool private isInPayment = false;
+    // reentrency check : todo
     function buy_batch(
         BuyItem[] calldata items,
         uint80 roundId
@@ -384,34 +385,7 @@ contract Droplinked is ERC1155 {
                 amounts[amountsCnt++] = droplinked_share;
                 amounts[amountsCnt++] = producer_share;
             } else if (items[i].itemType == ItemType.Affiliate) {
-                uint requestId = items[i].requestId;
-                uint amount = items[i].amount;
-                uint shipping = items[i].shipping;
-                uint tax = items[i].tax;
-                address prod = requests[requestId].producer;
-                address publ = requests[requestId].publisher;
-                uint tokenId = requests[requestId].tokenId;
-                uint product_price = (amount *
-                    metadatas[tokenId].price *
-                    1e24) / ratio;
-                uint total_amount = product_price +
-                    (((shipping + tax) * 1e24) / ratio);
-                if (msg.value < total_amount) revert NotEnoughBalance();
-                if (holders[tokenId][prod] < amount) revert NotEnoughtTokens();
-                uint droplinked_share = (product_price * fee) / 1e4;
-                uint publisher_share = ((product_price - droplinked_share) *
-                    metadatas[tokenId].comission) / 1e4;
-                uint producer_share = total_amount -
-                    (droplinked_share + publisher_share);
-                holders[tokenId][msg.sender] += amount;
-                holders[tokenId][prod] -= amount;
-                emit AffiliateBuy(requestId, amount, shipping, tax, msg.sender);
-                recivers[reciversCnt++] = owner;
-                recivers[reciversCnt++] = prod;
-                recivers[reciversCnt++] = publ;
-                amounts[amountsCnt++] = droplinked_share;
-                amounts[amountsCnt++] = producer_share;
-                amounts[amountsCnt++] = publisher_share;
+                this.buy_affiliate{value : 0}(items[i].requestId, items[i].amount, items[i].shipping, items[i].tax, roundId); //todo
             } else {
                 revert();
             }
@@ -524,7 +498,7 @@ contract Droplinked is ERC1155 {
         amounts[0] = droplinked_share;
         amounts[1] = producer_share;
         amounts[2] = publisher_share;
-        paymentContract.batchPay{value: msg.value}(recivers, amounts);
+        paymentContract.batchPay{value: droplinked_share+producer_share+publisher_share}(recivers, amounts);
     }
 
     // Returns the totalSupply of the contract

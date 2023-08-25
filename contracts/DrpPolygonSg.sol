@@ -13,15 +13,6 @@ interface IPaymentContract {
     ) external payable;
 }
 
-contract DroplinkedPayment{
-    function batchPay(address[] memory _recipients, uint256[] memory _amounts) public payable{
-        require(_recipients.length == _amounts.length, "Invalid input");
-        for(uint256 i = 0; i < _recipients.length; i++){
-            payable(_recipients[i]).transfer(_amounts[i]); 
-        }
-    }
-} 
-
 contract DroplinkedSg is ERC1155 {
     IPaymentContract internal immutable paymentContract;
     // Using price feed of chainlink to get the price of MATIC/USD without external source or centralization
@@ -404,34 +395,7 @@ contract DroplinkedSg is ERC1155 {
                 amounts[amountsCnt++] = droplinked_share;
                 amounts[amountsCnt++] = producer_share;
             } else if (items[i].itemType == ItemType.Affiliate) {
-                uint requestId = items[i].requestId;
-                uint amount = items[i].amount;
-                uint shipping = items[i].shipping;
-                uint tax = items[i].tax;
-                address prod = requests[requestId].producer;
-                address publ = requests[requestId].publisher;
-                uint tokenId = requests[requestId].tokenId;
-                uint product_price = (amount *
-                    metadatas[tokenId].price *
-                    1e24) / latestAnswer;
-                uint total_amount = product_price +
-                    (((shipping + tax) * 1e24) / latestAnswer);
-                if (msg.value < total_amount) revert NotEnoughBalance();
-                if (holders[tokenId][prod] < amount) revert NotEnoughtTokens();
-                uint droplinked_share = (product_price * fee) / 1e4;
-                uint publisher_share = ((product_price - droplinked_share) *
-                    metadatas[tokenId].comission) / 1e4;
-                uint producer_share = total_amount -
-                    (droplinked_share + publisher_share);
-                holders[tokenId][msg.sender] += amount;
-                holders[tokenId][prod] -= amount;
-                emit AffiliateBuy(requestId, amount, shipping, tax, msg.sender);
-                recivers[reciversCnt++] = owner;
-                recivers[reciversCnt++] = prod;
-                recivers[reciversCnt++] = publ;
-                amounts[amountsCnt++] = droplinked_share;
-                amounts[amountsCnt++] = producer_share;
-                amounts[amountsCnt++] = publisher_share;
+                this.buy_affiliate(items[i].requestId, items[i].amount, items[i].shipping, items[i].tax, latestAnswer, timestamp, signature);
             } else {
                 revert();
             }
