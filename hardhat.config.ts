@@ -25,18 +25,16 @@ const config: HardhatUserConfig = {
         process.env.HEDERA_TESTNET_OPERATOR_PRIVATE_KEY as string,
       ],
     },
-    XRPSideChain : {
-      url: process.env.XRP_TESTNET_ENDPOINT,
-      //the Hedera testnet account ECDSA private
-      //the public address for the account is derived from the private key
-      accounts: [
-        process.env.XRP_TESTNET_OPERATOR_PRIVATE_KEY as string,
-      ],
-    }
+    xrpl: {
+      url: `https://rpc-evm-sidechain.xrpl.org`,
+      accounts: [process.env.XRP_TESTNET_OPERATOR_PRIVATE_KEY as string],
+      chainId: 1440002,
+    },
   },
   solidity: {
     version: "0.8.18",
     settings: {
+      viaIR: true,
       optimizer: {
         enabled: true,
         runs: 200
@@ -44,7 +42,17 @@ const config: HardhatUserConfig = {
     }
   },
   etherscan:{
-    apiKey: (process.env.POLYGONSCAN_API_KEY) as string
+    apiKey: (process.env.HEDERA_TESTNET_ENDPOINT) as string,
+    customChains: [
+      {
+        network: "xrpl",
+        chainId: 1440002,
+        urls: {
+          apiURL: "https://evm-sidechain.xrpl.org/api",
+          browserURL: "https://evm-sidechain.xrpl.org"
+        }
+      }
+    ]
   }
 };
 

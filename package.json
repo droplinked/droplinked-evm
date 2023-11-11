@@ -4,6 +4,8 @@
   "description": "HardHat environment for droplinked contracts",
   "main": "index.js",
   "scripts": {
+    "deploy:xrpl": "npx hardhat run --network xrpl ./scripts/deploy.ts",
+    "verify:xrpl": "npx hardhat verify --network xrpl ",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
