@@ -21,14 +21,12 @@ For instance, running
 npx hardhat run scripts/deploy.ts --network polygon_mumbai
 ```
 
-would result in something like this
+or run
 ```bash
-[ ✅ ] Payment Contract deployed to: 0x5b080b9dDAc04FAD620a92Cd3484767a38a10593
-[ ✅ ] Droplinked deployed to: 0x34C4db97cE4cA2cce48757F85C954C5647124106 with fee: 100
+npm run deploy:mumbai
 ```
 
-## Contracts
-You can find the contract source codes for 2 types of chains in the Contracts folder, 
-- `DrpPayment.sol` file contains the payment contract source code
-- `DrpPolygon.sol` file contains the Droplinked-contract source code for chains which ChainLink has price feeds on them which are : Polygon & Binance
-- `DrpPolygonSg.sol` file contains the Droplinked-contract source code for chains which ChainLink doen't have price feeds on them, It relies on price signing and signature verification for payments
+would result in something like this
+```bash
+[ ✅ ] Droplinked deployed to: 0x34C4db97cE4cA2cce48757F85C954C5647124106 with fee: 100
+```
