@@ -6,8 +6,16 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
     },
-    polygon_mumbai: {
+    polygonMumbai: {
       url: "https://rpc-mumbai.maticvigil.com",
+      accounts: [process.env.PRIVATE_KEY as string]
+    },
+    polygon: {
+      url: "https://polygon-rpc.com/",
+      accounts: [process.env.POLYGON_PK as string]
+    },
+    baset: {
+      url: "https://goerli.base.org",
       accounts: [process.env.PRIVATE_KEY as string]
     },
     binance_testnet:{
@@ -42,7 +50,7 @@ const config: HardhatUserConfig = {
     }
   },
   etherscan:{
-    apiKey: (process.env.HEDERA_TESTNET_ENDPOINT) as string,
+    apiKey: (process.env.POLYGONSCAN_API_KEY) as string,
     customChains: [
       {
         network: "xrpl",

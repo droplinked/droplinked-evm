@@ -4,9 +4,15 @@
   "description": "HardHat environment for droplinked contracts",
   "main": "index.js",
   "scripts": {
+    "contract:test": "npx hardhat test test/test.ts",
+    "compile": "npx hardhat compile",
     "deploy:xrpl": "npx hardhat run --network xrpl ./scripts/deploy.ts",
     "verify:xrpl": "npx hardhat verify --network xrpl ",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "deploy:mumbai": "npx hardhat run --network polygonMumbai ./scripts/deploy.ts",
+    "verify:mumbai": "npx hardhat verify --network polygonMumbai ",
+    "deploy:baset": "npx hardhat run --network baset ./scripts/deploy.ts",
+    "verify:baset": "npx hardhat verify --network baset ",
+    "verify:polygon": "npx hardhat verify --network polygon "
   },
   "author": "",
   "license": "ISC",
@@ -19,6 +25,7 @@
   "dependencies": {
     "@chainlink/contracts": "^0.6.1",
     "@openzeppelin/contracts": "^4.9.3",
+    "circomlib": "^2.0.5",
     "dotenv": "^16.3.1"
   }
 }
