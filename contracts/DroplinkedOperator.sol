@@ -1,12 +1,12 @@
 //// SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
-import "contracts/IERC20.sol";
-import "contracts/IDroplinkedToken.sol";
-import "contracts/IDroplinkedBase.sol";
+import "./IERC20.sol";
+import "./IDroplinkedToken.sol";
+import "./IDroplinkedBase.sol";
+import "./DroplinkedBase.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./DroplinkedBase.sol";
 import "./DroplinkedToken.sol";
 
 contract DroplinkedOperator is Ownable{
@@ -15,7 +15,7 @@ contract DroplinkedOperator is Ownable{
     error RequestNotfound();
     error RequestIsAccepted();
     error NotSupportedERC20Token();
-    error DifferentAmounts();
+    error InvalidInput();
     error TimePassed();
     error oldPrice();
     error NotEnoughTokens(uint tokenId, address tokenOwner);
@@ -29,6 +29,11 @@ contract DroplinkedOperator is Ownable{
     IDroplinkedToken public droplinkedToken;
     IDroplinkedBase public droplinkedBase;
     bool internal locked;
+    struct Beneficiary{
+        bool isPercentage; 
+        uint value;
+        address _address;
+    }
     // Polygon Mumbai: 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
     // Polygon: 0xAB594600376Ec9fD91F8e885dADF0CE036862dE0
     AggregatorV3Interface internal immutable priceFeed =
@@ -78,6 +83,7 @@ contract DroplinkedOperator is Ownable{
         return droplinkedToken.getFee();
     }
 
+    // TODO: 
     function mint(string calldata _uri, uint256 _price, uint256 _commission, uint256 amount, address receiver) public {
         uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver);
         droplinkedBase.setMetadata(_price, _commission, msg.sender, tokenId);
@@ -136,6 +142,48 @@ contract DroplinkedOperator is Ownable{
         droplinkedBase.removeERC20Address(erc20token);
     }
     address signer = 0xE9a42F43bF6EDFB8d9481ec4DcFAADb908370595;
+
+    struct PurchaseData{
+        uint tokenId;
+        uint amounts;
+        uint requestId;
+        address from;
+        bool isAffiliate;
+    }
+
+    // The most important section!
+    function decentralizedPurchase(uint80 roundId, PurchaseData[] memory purchaseData) public payable noReentrant{
+        (uint ratio, uint timestamp) = getLatestPrice(roundId);
+        uint totalValue = msg.value;
+        if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
+        for (uint i = 0; i < purchaseData.length; i++){
+            PurchaseData memory pdata = purchaseData[i];
+            if (!pdata.isAffiliate){
+                (uint price, ) = droplinkedBase.getMetadata(pdata.tokenId, pdata.from);
+                // get the beneficiaries
+                uint[] beneficiaries = DroplinkedBase.getBeneficariesList(pdata.tokenId, pdata.from);
+                for (uint j = 0; j < beneficiaries.length; j++){
+                    uint beneficiaryHash = beneficiaries[j];
+                    Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(beneficiaryHash);
+                    if(_beneficiary.isPercentage){
+                        // transfer the percentage to the beneficiary
+                        payable(_beneficiary.address).transfer(
+                            (totalValue * _beneficiary.percentage) / 10000
+                        );
+                        // TODO:
+                    } else {
+                        // TODO:
+                    }
+                }
+            } else{
+                // first get the owner of the token from requestId
+                Request _requset = droplinkedBase.getRequest(pdata.requestId).producer;
+                address _producer = _requset.producer;
+                address _publisher = _requset.publisher;
+                // TODO:
+            }
+        }
+    }
 
     // Direct Buy
     function purchaseNFT(uint tokenId, address tokenOwner, uint amount, uint80 roundId) public payable{

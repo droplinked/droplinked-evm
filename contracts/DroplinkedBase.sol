@@ -20,6 +20,10 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     //
     mapping(address => bool) public erc20Addresses;
 
+    function getBeneficariesList(uint tokenId, address _owner) public view returns (uint[] memory){
+        return tokenBeneficiaries[tokenId][_owner];
+    }
+
     function setMetadata(
         uint price,
         uint commission,

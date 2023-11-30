@@ -4,9 +4,8 @@ pragma solidity 0.8.18;
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./Operatable.sol";
-import "./IDroplinkedToken.sol";
 
-contract DroplinkedToken is IDroplinkedToken ,ERC1155, Operatable{
+contract DroplinkedToken is ERC1155, Operatable{
     event MintEvent(uint tokenId, address recipient, uint amount, string uri);
     uint public totalSupply;
     uint public fee;
@@ -91,7 +90,7 @@ contract DroplinkedToken is IDroplinkedToken ,ERC1155, Operatable{
         uint id,
         uint amount,
         bytes memory data
-    ) public virtual override(ERC1155, IDroplinkedToken) {
+    ) public virtual override {
         if(msg.sender != operatorContract){
             require(
                 from == _msgSender() || isApprovedForAll(from, _msgSender()),

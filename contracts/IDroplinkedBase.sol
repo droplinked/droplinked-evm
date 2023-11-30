@@ -8,7 +8,7 @@ struct Request {
 }
 interface IDroplinkedBase {
     function setRequest(Request calldata req, uint256 requestId) external;
-
+    function addCoupon(uint _secretHash, bool _isPercentage, uint _value) external;
     function setIsRequested(
         address producer_account,
         address publisher_account,
