@@ -9,19 +9,41 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     uint public requestCnt;
+    error InvalidSumOfDicount();
     mapping(uint => Request) public requests;
     mapping(address => mapping(address => mapping(uint => bool))) public isRequested;
     mapping(address => mapping(uint => bool)) public publishersRequests;
     mapping(address => mapping(uint => bool)) public producerRequests;
     // metadatas
-    mapping(uint => mapping(address => uint)) public prices;
-    mapping(uint => mapping(address => uint)) public commissions;
-    mapping(uint => mapping(address => uint[])) public tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
+    mapping(uint => mapping(address => uint)) public _prices;
+    mapping(uint => mapping(address => uint)) public _commissions;
+    mapping(uint => mapping(address => uint[])) public _tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
+    mapping(uint => TokenType) public _tokenTypes; // tokenId => tokenType
     //
     mapping(address => bool) public erc20Addresses;
 
     function getBeneficariesList(uint tokenId, address _owner) public view returns (uint[] memory){
-        return tokenBeneficiaries[tokenId][_owner];
+        return _tokenBeneficiaries[tokenId][_owner];
+    }
+
+    // Needs to be updated ----------------
+    uint[] private _result;
+    function getSelectiveBeneficiaries(uint tokenId, address _owner, uint mode) public returns(uint[] memory){ // 0 : value | 1 : percentage
+        delete _result;
+        for(uint i = 0; i < _tokenBeneficiaries[tokenId][_owner].length; i++){
+            if(!getBeneficiary(_tokenBeneficiaries[tokenId][_owner][i]).isPercentage && mode == 0){
+                _result.push(_tokenBeneficiaries[tokenId][_owner][i]);
+            }
+            if(getBeneficiary(_tokenBeneficiaries[tokenId][_owner][i]).isPercentage && mode == 1){
+                _result.push(_tokenBeneficiaries[tokenId][_owner][i]);
+            }
+        }
+        return _result;
+    }
+    //-----------------------
+
+    function getTokenType(uint tokenId) public view returns (TokenType){
+        return _tokenTypes[tokenId];
     }
 
     function setMetadata(
@@ -29,12 +51,20 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         uint commission,
         address _owner,
         uint[] memory _beneficiaries,
+        TokenType _tokenType,
         uint tokenId
     ) public onlyOperator {
-        prices[tokenId][_owner] = price;
-        commissions[tokenId][_owner] = commission;
+        _tokenTypes[tokenId] = _tokenType;
+        _prices[tokenId][_owner] = price;
+        _commissions[tokenId][_owner] = commission;
+        uint percentageSum = 0;
         for (uint i = 0; i < _beneficiaries.length; i++) {
-            tokenBeneficiaries[tokenId][_owner].push(_beneficiaries[i]);
+            _tokenBeneficiaries[tokenId][_owner].push(_beneficiaries[i]);
+            Beneficiary memory _benef = getBeneficiary(_beneficiaries[i]);
+            if(_benef.isPercentage){
+                percentageSum += _benef.value;
+            }
+            if(percentageSum > 1e4) revert InvalidSumOfDicount();
         }
     }
 
@@ -42,7 +72,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         uint tokenId,
         address _owner
     ) public view onlyOperator returns (uint, uint) {
-        return (prices[tokenId][_owner], commissions[tokenId][_owner]);
+        return (_prices[tokenId][_owner], _commissions[tokenId][_owner]);
     }
 
     function setRequest(

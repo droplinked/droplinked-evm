@@ -2,9 +2,9 @@
 pragma solidity 0.8.18;
 
 import "./CouponVerifier.sol";
+import "./IDroplinkedBase.sol";
 
-contract CouponManager is CouponVerifier{
-    /// @title Coupon struct
+/// @title Coupon struct
     /// @dev Represents a coupon with various properties
     struct Coupon {
         /// @dev Indicates if the coupon value is a percentage or a fixed amount
@@ -18,7 +18,10 @@ contract CouponManager is CouponVerifier{
     
         /// @dev The address of the coupon producer
         address couponProducer;
-    }
+}
+
+contract CouponManager is CouponVerifier{
+    
 
     mapping (uint => bool) public couponAvailable;
     mapping (uint => Coupon) public coupons;
@@ -86,19 +89,19 @@ contract CouponManager is CouponVerifier{
     // - _pubSignals: An array of 3 uints representing public signals of the proof
     // Returns:
     // - Coupon: A struct representing the coupon
-    function checkAndGetCoupon(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[3] calldata _pubSignals) public view returns(Coupon memory) {
-        uint a1 = _pubSignals[0];
-        uint a2 = _pubSignals[1];
+    function checkAndGetCoupon(CouponProof calldata _proof) public view returns(Coupon memory) {
+        uint a1 = _proof._pubSignals[0];
+        uint a2 = _proof._pubSignals[1];
         uint _hash = combineUint128(uint128(a1), uint128(a2));
     
         // Check if the coupon hash is available
         require(couponAvailable[_hash], "The coupon hash is not available");
     
         // Check if the caller is the expected address in the proof
-        require(uint(uint160(msg.sender)) == _pubSignals[2], "No front running!");
+        require(uint(uint160(msg.sender)) == _proof._pubSignals[2], "No front running!");
     
         // Check if the proof is valid
-        require(verifyProof(_pA, _pB, _pC, _pubSignals), "Proof is invalid");
+        require(verifyProof(_proof._pA, _proof._pB, _proof._pC, _proof._pubSignals), "Proof is invalid");
     
         // Return the coupon
         return coupons[_hash];

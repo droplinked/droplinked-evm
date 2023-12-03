@@ -62,7 +62,7 @@ contract CouponVerifier {
 
     uint16 constant pLastMem = 896;
 
-    function verifyProof(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[3] calldata _pubSignals) public view returns (bool) {
+    function verifyProof(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[3] calldata _pubSignals) public view returns (bool valid) {
         assembly {
             function checkField(v) {
                 if iszero(lt(v, q)) {
@@ -178,7 +178,8 @@ contract CouponVerifier {
             let isValid := checkPairing(_pA, _pB, _pC, _pubSignals, pMem)
 
             mstore(0, isValid)
-             return(0, 0x20)
+            valid := mload(0)
+            // return(0, 0x20)
          }
      }
  }

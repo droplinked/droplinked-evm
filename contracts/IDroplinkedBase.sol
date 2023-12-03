@@ -1,14 +1,41 @@
 //// SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
+import "./CouponManager.sol";
 struct Request {
     uint256 tokenId;
     address producer;
     address publisher;
     bool accepted;
 }
+struct Beneficiary{
+    bool isPercentage; 
+    uint value;
+    address _address;
+}
+enum TokenType {
+    DIGITAL,
+    PHYSICAL,
+    POD
+}
+struct CouponProof {
+    uint[2] _pA;
+    uint[2][2] _pB;
+    uint[2] _pC;
+    uint[3] _pubSignals;
+    bool _provided;
+}
+
 interface IDroplinkedBase {
     function setRequest(Request calldata req, uint256 requestId) external;
-    function addCoupon(uint _secretHash, bool _isPercentage, uint _value) external;
+    function getBeneficariesList(uint tokenId, address _owner) external view returns (uint[] memory);
+    function getSelectiveBeneficiaries(uint tokenId, address _owner, uint mode) external returns(uint[] memory);
+    function getBeneficiary(uint _hash) external view returns(Beneficiary memory);
+    function addCoupon(
+        uint _secretHash,
+        bool _isPercentage,
+        uint _value
+    ) external;
+
     function setIsRequested(
         address producer_account,
         address publisher_account,
@@ -17,11 +44,13 @@ interface IDroplinkedBase {
     ) external;
 
     function setMetadata(
-        uint256 price,
-        uint256 commission,
+        uint price,
+        uint commission,
         address _owner,
-        uint256 tokenId
-    ) external; // needs to be updated! added beneficaries
+        uint[] memory _beneficiaries,
+        TokenType _tokenType,
+        uint tokenId
+    ) external;
 
     function setPublishersRequests(
         address publisher_account,
@@ -63,6 +92,8 @@ interface IDroplinkedBase {
 
     function removeERC20Address(address erc20contract) external;
 
+    function getTokenType(uint tokenId) external view returns (TokenType);
+
     function isERC20AddressIncluded(
         address erc20contract
     ) external view returns (bool);
@@ -71,4 +102,8 @@ interface IDroplinkedBase {
         uint tokenId,
         address _owner
     ) external view returns (uint, uint);
+
+    function checkAndGetCoupon(
+        CouponProof calldata _proof
+    ) external view returns (Coupon memory);
 }

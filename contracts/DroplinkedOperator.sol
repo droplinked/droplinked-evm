@@ -8,40 +8,49 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./DroplinkedToken.sol";
+import "./CouponManager.sol";
 
-contract DroplinkedOperator is Ownable{
+// todo: support ERC20 for payment
+
+contract DroplinkedOperator is Ownable {
     error AccessDenied();
     error AlreadyRequested();
     error RequestNotfound();
     error RequestIsAccepted();
+    error RequestIsNotAccepted();
     error NotSupportedERC20Token();
-    error InvalidInput();
-    error TimePassed();
     error oldPrice();
+    error InvalidAmounts();
+    error InvalidCouponValue();
+    error CouponCantBeApplied();
     error NotEnoughTokens(uint tokenId, address tokenOwner);
     error ERC20TransferFailed(uint amount, address receiver);
+    error InvalidFromAddress();
+
     event PublishRequest(uint256 tokenId, uint256 requestId);
     event AcceptRequest(uint256 requestId);
     event CancelRequest(uint256 requestId);
     event DisapproveRequest(uint256 requestId);
     event DeployedBase(address _droplinkedBase);
     event DeployedToken(address _droplinkedToken);
+
     IDroplinkedToken public droplinkedToken;
     IDroplinkedBase public droplinkedBase;
     bool internal locked;
-    struct Beneficiary{
-        bool isPercentage; 
-        uint value;
-        address _address;
-    }
+
     // Polygon Mumbai: 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
     // Polygon: 0xAB594600376Ec9fD91F8e885dADF0CE036862dE0
     AggregatorV3Interface internal immutable priceFeed =
         AggregatorV3Interface(0xAB594600376Ec9fD91F8e885dADF0CE036862dE0);
-    
-     // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
+
+    address public immutable droplinkedWallet =
+        0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78;
+
+    // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
     function getLatestPrice(uint80 roundId) public view returns (uint, uint) {
-        (, int256 price, , uint256 timestamp, ) = priceFeed.getRoundData(roundId);
+        (, int256 price, , uint256 timestamp, ) = priceFeed.getRoundData(
+            roundId
+        );
         return (uint(price), timestamp);
     }
 
@@ -53,20 +62,20 @@ contract DroplinkedOperator is Ownable{
     }
 
     constructor(address _base, address _token) {
-        if(_base != address(0)){
+        if (_base != address(0)) {
             DroplinkedBase base = new DroplinkedBase();
             droplinkedBase = IDroplinkedBase(address(base));
             base.setOperator(address(this));
             emit DeployedBase(address(base));
-        } else{
+        } else {
             droplinkedBase = IDroplinkedBase(_base);
         }
-        if(_token != address(0)){
+        if (_token != address(0)) {
             DroplinkedToken token = new DroplinkedToken();
             droplinkedToken = IDroplinkedToken(address(token));
             token.setOperator(address(this));
             emit DeployedToken(address(token));
-        } else{
+        } else {
             droplinkedToken = IDroplinkedToken(_token);
         }
     }
@@ -79,18 +88,34 @@ contract DroplinkedOperator is Ownable{
         droplinkedToken.setFee(_fee);
     }
 
-    function getFee() public view returns (uint){
+    function getFee() public view returns (uint) {
         return droplinkedToken.getFee();
     }
 
-    // TODO: 
-    function mint(string calldata _uri, uint256 _price, uint256 _commission, uint256 amount, address receiver) public {
+    function mint(
+        string calldata _uri,
+        uint256 _price,
+        uint256 _commission,
+        uint256 amount,
+        address receiver,
+        uint[] memory _beneficiaries,
+        TokenType _tokenType
+    ) public {
         uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver);
-        droplinkedBase.setMetadata(_price, _commission, msg.sender, tokenId);
+        droplinkedBase.setMetadata(
+            _price,
+            _commission,
+            msg.sender,
+            _beneficiaries,
+            _tokenType,
+            tokenId
+        );
     }
 
     function publish_request(address producer_account, uint256 tokenId) public {
-        if (droplinkedBase.getIsRequested(producer_account, msg.sender, tokenId)) revert AlreadyRequested();
+        if (
+            droplinkedBase.getIsRequested(producer_account, msg.sender, tokenId)
+        ) revert AlreadyRequested();
 
         uint256 requestId = droplinkedBase.getRequestCnt() + 1;
         droplinkedBase.setRequestCnt(requestId);
@@ -102,7 +127,12 @@ contract DroplinkedOperator is Ownable{
         droplinkedBase.setRequest(req, requestId);
         droplinkedBase.setPublishersRequests(msg.sender, requestId, true);
         droplinkedBase.setProducersRequests(producer_account, requestId, true);
-        droplinkedBase.setIsRequested(producer_account,msg.sender,tokenId,true);
+        droplinkedBase.setIsRequested(
+            producer_account,
+            msg.sender,
+            tokenId,
+            true
+        );
         emit PublishRequest(tokenId, requestId);
     }
 
@@ -120,7 +150,12 @@ contract DroplinkedOperator is Ownable{
         if (req.accepted) revert RequestIsAccepted();
         droplinkedBase.setProducersRequests(req.producer, requestId, false);
         droplinkedBase.setPublishersRequests(msg.sender, requestId, false);
-        droplinkedBase.setIsRequested(req.producer,msg.sender,req.tokenId,false);
+        droplinkedBase.setIsRequested(
+            req.producer,
+            msg.sender,
+            req.tokenId,
+            false
+        );
         emit CancelRequest(requestId);
     }
 
@@ -129,150 +164,253 @@ contract DroplinkedOperator is Ownable{
         if (msg.sender != req.producer) revert AccessDenied();
         droplinkedBase.setProducersRequests(msg.sender, requestId, false);
         droplinkedBase.setPublishersRequests(req.publisher, requestId, false);
-        droplinkedBase.setIsRequested(req.producer,req.publisher,req.tokenId,false);
+        droplinkedBase.setIsRequested(
+            req.producer,
+            req.publisher,
+            req.tokenId,
+            false
+        );
         droplinkedBase.setAccepted(requestId, false);
         emit DisapproveRequest(requestId);
     }
 
-    function addERC20Contract(address erc20token) public onlyOwner{
+    function addERC20Contract(address erc20token) public onlyOwner {
         droplinkedBase.addERC20Address(erc20token);
     }
 
-    function removeERC20Contract(address erc20token) public onlyOwner{
+    function removeERC20Contract(address erc20token) public onlyOwner {
         droplinkedBase.removeERC20Address(erc20token);
     }
-    address signer = 0xE9a42F43bF6EDFB8d9481ec4DcFAADb908370595;
 
-    struct PurchaseData{
+    struct PurchaseData {
+        // ==> For affiliate and recorded products
         uint tokenId;
-        uint amounts;
+        uint amount;
         uint requestId;
-        address from;
         bool isAffiliate;
     }
 
+    struct DirectPurchaseData {
+        // ==> For direct payment and non recorded products
+        uint amount;
+        uint price; // 100x
+    }
+
+    function toETHPrice(uint value, uint ratio) public pure returns (uint) {
+        return (1e24 * value) / ratio;
+    }
+
+    function applyPercentage(
+        uint value,
+        uint percentage
+    ) private pure returns (uint) {
+        return (value * percentage) / 1e4;
+    }
+
     // The most important section!
-    function decentralizedPurchase(uint80 roundId, PurchaseData[] memory purchaseData) public payable noReentrant{
+    // No ruleset Version
+    function decentralizedPurchase(
+        uint80 roundId,
+        PurchaseData[] memory purchaseData,
+        DirectPurchaseData[] memory directPurchase,
+        uint tax,
+        uint shipping,
+        address _fromAddress,
+        CouponProof calldata _proof
+    ) public payable noReentrant {
         (uint ratio, uint timestamp) = getLatestPrice(roundId);
-        uint totalValue = msg.value;
-        if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
-        for (uint i = 0; i < purchaseData.length; i++){
-            PurchaseData memory pdata = purchaseData[i];
-            if (!pdata.isAffiliate){
-                (uint price, ) = droplinkedBase.getMetadata(pdata.tokenId, pdata.from);
-                // get the beneficiaries
-                uint[] beneficiaries = DroplinkedBase.getBeneficariesList(pdata.tokenId, pdata.from);
-                for (uint j = 0; j < beneficiaries.length; j++){
-                    uint beneficiaryHash = beneficiaries[j];
-                    Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(beneficiaryHash);
-                    if(_beneficiary.isPercentage){
-                        // transfer the percentage to the beneficiary
-                        payable(_beneficiary.address).transfer(
-                            (totalValue * _beneficiary.percentage) / 10000
-                        );
-                        // TODO:
-                    } else {
-                        // TODO:
-                    }
-                }
-            } else{
-                // first get the owner of the token from requestId
-                Request _requset = droplinkedBase.getRequest(pdata.requestId).producer;
-                address _producer = _requset.producer;
-                address _publisher = _requset.publisher;
-                // TODO:
-            }
-        }
-    }
-
-    // Direct Buy
-    function purchaseNFT(uint tokenId, address tokenOwner, uint amount, uint80 roundId) public payable{
-        (uint ratio, uint timestamp) = getLatestPrice(roundId);
-        // check if the tokenOwner has at least amount of the tokenId
-        if (droplinkedToken.getOwnerAmount(tokenId, tokenOwner) < amount)
-            revert NotEnoughTokens(tokenId, tokenOwner);
-        // check the timing
         if (
             block.timestamp > timestamp &&
-            block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())
+            block.timestamp - timestamp >
+            2 * uint(droplinkedToken.getHeartBeat())
         ) revert oldPrice();
-        (uint price, ) = droplinkedBase.getMetadata(tokenId, tokenOwner);
-        uint product_price = (amount * price * 1e24) / ratio;
-        droplinkedToken.safeTransferFrom(tokenOwner, msg.sender, tokenId, amount, "");
-        payable(tokenOwner).transfer(product_price);
-    }
-
-    function payment(uint[] memory amounts, address[] memory receivers, uint[] memory tokenIds, uint[] memory tokenAmounts, address tokenReceivers, address[] memory tokenSenders, address erc20TokenContract, uint timestamp, bytes memory signature) public payable noReentrant {
-        // initial checks
-        if (!(amounts.length == receivers.length && tokenIds.length == tokenAmounts.length && tokenAmounts.length == tokenSenders.length)) revert DifferentAmounts();
-        // signature & time checks
-        if (ECDSA.recover(ECDSA.toEthSignedMessageHash(keccak256(abi.encodePacked(amounts, receivers, tokenIds, tokenAmounts, tokenReceivers, tokenSenders, erc20TokenContract, timestamp, address(this)))), signature) != signer)
-            revert AccessDenied();
-        if (
-            block.timestamp > timestamp &&
-            block.timestamp - timestamp > 2 * droplinkedToken.getHeartBeat()
-        ) revert TimePassed();
-        // Transfer the NFTS
-        for (uint i = 0; i < tokenIds.length; i+=1) {
-            uint tokenId = tokenIds[i];
-            uint amount = tokenAmounts[i];
-            address receiver = tokenReceivers;
-            address sender = tokenSenders[i];
-            droplinkedToken.safeTransferFrom(sender, receiver , tokenId, amount, "");
-        }
-        if (erc20TokenContract != address(0)){
-            // erc20 payment
-            if (!droplinkedBase.isERC20AddressIncluded(erc20TokenContract)) revert NotSupportedERC20Token();
-            IERC20 erc20 = IERC20(erc20TokenContract);
-            for (uint i = 0; i < amounts.length; i++){
-                uint amount = amounts[i];
-                address receiver = receivers[i];
-                if (!erc20.transferFrom(msg.sender, receiver, amount)) revert ERC20TransferFailed(amount, receiver);
+        if (_proof._provided) {
+            // Coupon Provided
+            Coupon memory coupon = droplinkedBase.checkAndGetCoupon(_proof);
+            if (coupon.isPercentage) {
+                // Percent based
+                if (coupon.value > 1e4) revert InvalidCouponValue();
+                _purchase(
+                    ratio,
+                    purchaseData,
+                    directPurchase,
+                    tax,
+                    shipping,
+                    coupon.value,
+                    _fromAddress,
+                    true
+                );
+                return;
+            } else {
+                // Value based
+                _purchase(
+                    ratio,
+                    purchaseData,
+                    directPurchase,
+                    tax,
+                    shipping,
+                    coupon.value,
+                    _fromAddress,
+                    false
+                );
             }
         } else {
-            // Normal Payment with native token
-            for (uint i = 0; i < amounts.length; i++){
-                uint amount = amounts[i];
-                address receiver = receivers[i];
-                payable(receiver).transfer(amount);
-            }
+            // Coupon Not provided
+            _purchase(
+                ratio,
+                purchaseData,
+                directPurchase,
+                tax,
+                shipping,
+                0,
+                _fromAddress,
+                false
+            );
         }
     }
 
-    function paymentV2(uint[] memory amounts, address[] memory receivers, uint[] memory tokenIds, uint[] memory tokenAmounts, address[] memory tokenReceivers, address tokenSenders, address erc20TokenContract, uint timestamp, bytes memory signature) public payable noReentrant {
-        // initial checks
-        if (!(amounts.length == receivers.length && tokenIds.length == tokenAmounts.length && tokenAmounts.length == tokenReceivers.length)) revert DifferentAmounts();
-        // signature & time checks
-        if (ECDSA.recover(ECDSA.toEthSignedMessageHash(keccak256(abi.encodePacked(amounts, receivers, tokenIds, tokenAmounts, tokenReceivers, tokenSenders, erc20TokenContract, timestamp, address(this)))), signature) != signer)
-            revert AccessDenied();
-        if (
-            block.timestamp > timestamp &&
-            block.timestamp - timestamp > 2 * droplinkedToken.getHeartBeat()
-        ) revert TimePassed();
-        // Transfer the NFTS
-        for (uint i = 0; i < tokenIds.length; i+=1) {
-            uint tokenId = tokenIds[i];
-            uint amount = tokenAmounts[i];
-            address receiver = tokenReceivers[i];
-            address sender = tokenSenders;
-            droplinkedToken.safeTransferFrom(sender, receiver , tokenId, amount, "");
-        }
-        if (erc20TokenContract != address(0)){
-            // erc20 payment
-            if (!droplinkedBase.isERC20AddressIncluded(erc20TokenContract)) revert NotSupportedERC20Token();
-            IERC20 erc20 = IERC20(erc20TokenContract);
-            for (uint i = 0; i < amounts.length; i++){
-                uint amount = amounts[i];
-                address receiver = receivers[i];
-                if (!erc20.transferFrom(msg.sender, receiver, amount)) revert ERC20TransferFailed(amount, receiver);
+    function _applyCoupon(
+        uint totalProductPrice,
+        bool isPercentage,
+        uint couponValue,
+        uint ratio
+    ) private pure returns (uint) {
+        uint newProductPrice = 0;
+        if (!isPercentage) {
+            uint _creditValue = toETHPrice(couponValue, ratio);
+            if (_creditValue > totalProductPrice) {
+                newProductPrice = 0;
+                _creditValue -= totalProductPrice;
+            } else {
+                newProductPrice = totalProductPrice - _creditValue;
+                _creditValue = 0;
             }
         } else {
-            // Normal Payment with native token
-            for (uint i = 0; i < amounts.length; i++){
-                uint amount = amounts[i];
-                address receiver = receivers[i];
-                payable(receiver).transfer(amount);
-            }
+            if (couponValue > 1e4) revert InvalidCouponValue();
+            newProductPrice = applyPercentage(totalProductPrice, couponValue);
         }
+        return newProductPrice;
+    }
+
+    function _purchase(
+        uint ratio,
+        PurchaseData[] memory purchaseData,
+        DirectPurchaseData[] memory directPurchase,
+        uint tax,
+        uint shipping,
+        uint creditValue,
+        address _fromAddress,
+        bool isDiscount
+    ) private {
+        uint totalProductPrice = msg.value - toETHPrice(shipping + tax, ratio);
+        uint newProductPrice = _applyCoupon(
+            totalProductPrice,
+            isDiscount,
+            creditValue,
+            ratio
+        );
+        uint fee = droplinkedToken.getFee();
+
+        for (uint i = 0; i < purchaseData.length; i++) {
+            PurchaseData memory pdata = purchaseData[i];
+            address _producer;
+            address _publisher;
+            uint _tokenId = 0;
+            // INITIAL SECTION---------------------------------------------------
+            if (pdata.isAffiliate) {
+                if (creditValue != 0) revert CouponCantBeApplied();
+                Request memory _req = droplinkedBase.getRequest(
+                    pdata.requestId
+                );
+                if (!_req.accepted) revert RequestIsNotAccepted();
+                _producer = _req.producer;
+                _publisher = _req.publisher;
+                if (_publisher != _fromAddress) revert InvalidFromAddress();
+                _tokenId = _req.tokenId;
+            } else {
+                _producer = _fromAddress;
+                _publisher = msg.sender; // does not matter
+                _tokenId = pdata.tokenId;
+                if (_producer != _fromAddress) revert InvalidFromAddress();
+            }
+            (uint _productPrice, uint _commission) = droplinkedBase.getMetadata(
+                _tokenId,
+                _producer
+            );
+            uint _productETHPrice = (toETHPrice(
+                _productPrice * pdata.amount,
+                ratio
+            ) * newProductPrice) / totalProductPrice;
+            uint __publisherShare = applyPercentage(
+                _productETHPrice,
+                _commission
+            );
+            uint __droplinkedShare = applyPercentage(_productETHPrice, fee);
+            payable(_publisher).transfer(__publisherShare);
+            payable(droplinkedWallet).transfer(__droplinkedShare);
+            uint __productPriceWithoutPublisher = _productETHPrice -
+                __publisherShare -
+                __droplinkedShare;
+
+            // BENEFICIARY SECTION------------------------------------------------
+            // iterate over benficiaries
+            uint[] memory _valueBasedBeneficiaries = droplinkedBase
+                .getSelectiveBeneficiaries(_tokenId, _producer, 0);
+            uint[] memory _percentBasedBeneficiaries = droplinkedBase
+                .getSelectiveBeneficiaries(_tokenId, _producer, 1);
+            // Handle value based beneficiaries
+            for (uint j = 0; j < _valueBasedBeneficiaries.length; j++) {
+                Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(
+                    _valueBasedBeneficiaries[j]
+                );
+                uint __beneficiaryAmount = toETHPrice(
+                    _beneficiary.value,
+                    ratio
+                );
+                payable(_beneficiary._address).transfer(__beneficiaryAmount);
+                if (__beneficiaryAmount > __productPriceWithoutPublisher)
+                    revert InvalidAmounts();
+                __productPriceWithoutPublisher -= __beneficiaryAmount;
+            }
+            // Handle percentage based beneficiaries
+            for (uint j = 0; j < _percentBasedBeneficiaries.length; j++) {
+                Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(
+                    _percentBasedBeneficiaries[j]
+                );
+                uint __beneficiaryAmount = applyPercentage(
+                    __productPriceWithoutPublisher,
+                    _beneficiary.value
+                );
+                payable(_beneficiary._address).transfer(__beneficiaryAmount);
+                __productPriceWithoutPublisher -= __beneficiaryAmount;
+            }
+            // --------------------------------------------------------------------
+
+            // Transfer NFT section
+            if (
+                droplinkedToken.getOwnerAmount(_tokenId, _fromAddress) <
+                pdata.amount
+            ) revert NotEnoughTokens(_tokenId, _fromAddress);
+            droplinkedToken.safeTransferFrom(
+                _fromAddress,
+                msg.sender,
+                _tokenId,
+                pdata.amount,
+                ""
+            );
+        }
+        // Handle Direct payment data
+        for (uint i = 0; i < directPurchase.length; i++) {
+            DirectPurchaseData memory dpd = directPurchase[i];
+            uint _productETHPrice = toETHPrice(dpd.amount * dpd.price, ratio);
+            // just send the product price to the _fromAddress, nothing else is needed (?)
+            payable(_fromAddress).transfer(_productETHPrice);
+        }
+        // Transfer the tax & shipping to producer
+        payable(_fromAddress).transfer(tax + shipping);
+    }
+
+    function withdraw() public onlyOwner {
+        payable(msg.sender).transfer(address(this).balance);
     }
 }

@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
 
+import "./IDroplinkedBase.sol";
+
 contract BenficiaryManager {
-    struct Beneficiary{
-        bool isPercentage; 
-        uint value;
-        address _address;
-    }
-    
+
     mapping (uint => bool) private _beneficaryExists;
     mapping (uint => Beneficiary) public beneficiaries;
 
