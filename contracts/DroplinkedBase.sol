@@ -18,7 +18,6 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     mapping(uint => mapping(address => uint)) public _prices;
     mapping(uint => mapping(address => uint)) public _commissions;
     mapping(uint => mapping(address => uint[])) public _tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
-    mapping(uint => TokenType) public _tokenTypes; // tokenId => tokenType
     //
     mapping(address => bool) public erc20Addresses;
 
@@ -42,19 +41,13 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     }
     //-----------------------
 
-    function getTokenType(uint tokenId) public view returns (TokenType){
-        return _tokenTypes[tokenId];
-    }
-
     function setMetadata(
         uint price,
         uint commission,
         address _owner,
         uint[] memory _beneficiaries,
-        TokenType _tokenType,
         uint tokenId
     ) public onlyOperator {
-        _tokenTypes[tokenId] = _tokenType;
         _prices[tokenId][_owner] = price;
         _commissions[tokenId][_owner] = commission;
         uint percentageSum = 0;

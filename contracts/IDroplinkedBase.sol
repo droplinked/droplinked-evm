@@ -12,11 +12,7 @@ struct Beneficiary{
     uint value;
     address _address;
 }
-enum TokenType {
-    DIGITAL,
-    PHYSICAL,
-    POD
-}
+
 struct CouponProof {
     uint[2] _pA;
     uint[2][2] _pB;
@@ -48,7 +44,6 @@ interface IDroplinkedBase {
         uint commission,
         address _owner,
         uint[] memory _beneficiaries,
-        TokenType _tokenType,
         uint tokenId
     ) external;
 
@@ -91,8 +86,6 @@ interface IDroplinkedBase {
     function addERC20Address(address erc20contract) external;
 
     function removeERC20Address(address erc20contract) external;
-
-    function getTokenType(uint tokenId) external view returns (TokenType);
 
     function isERC20AddressIncluded(
         address erc20contract

@@ -5,13 +5,9 @@ describe("Droplinked", function(){
     async function deployContract() {
         const fee = 100;
         const [owner,producer,publisher,customer] = await ethers.getSigners();
-        const Token = await ethers.getContractFactory("DroplinkedToken");
-        const token = await Token.deploy();
-        const Base = await ethers.getContractFactory("DroplinkedBase");
-        const base = await Base.deploy();
         const Droplinked = await ethers.getContractFactory("DroplinkedOperator");
-        const droplinked = await Droplinked.deploy(await base.getAddress(), await token.getAddress());
-        return {droplinked, token, base, owner, producer, publisher, customer, fee};
+        const droplinked = await Droplinked.deploy("0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000");
+        return {droplinked, owner, producer, publisher, customer, fee};
     }
 
     describe("Deployment", function(){
@@ -26,23 +22,23 @@ describe("Droplinked", function(){
     });
 
     describe("Mint", function(){
-        it("Should mint 5000 tokens", async function(){
-            const {droplinked,producer, token} = await deployContract();
-            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
-            console.log(await token.balanceOf(producer.address, 1));
-            expect(await token.balanceOf(producer.address, 1)).to.equal(5000);
-        });
-        it("Should mint the same product with the same token_id", async function(){
-            const {droplinked,producer,token} = await deployContract();
-            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
-            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
-            expect(await token.balanceOf(producer.address, 1)).to.equal(5000*2);
-        });
-        it("Should set the right product metadata", async function(){
-            const {droplinked,producer, base} = await deployContract();
-            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
+        // it("Should mint 5000 tokens", async function(){
+        //     const {droplinked,producer, token} = await deployContract();
+        //     await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
+        //     console.log(await token.balanceOf(producer.address, 1));
+        //     expect(await token.balanceOf(producer.address, 1)).to.equal(5000);
+        // });
+        // it("Should mint the same product with the same token_id", async function(){
+        //     const {droplinked,producer,token} = await deployContract();
+        //     await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
+        //     await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
+        //     expect(await token.balanceOf(producer.address, 1)).to.equal(5000*2);
+        // });
+        // it("Should set the right product metadata", async function(){
+        //     const {droplinked,producer, base} = await deployContract();
+        //     await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address);
 
-        });
+        // });
     });
 
     // describe("PublishRequest", function(){

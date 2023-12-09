@@ -62,7 +62,7 @@ contract DroplinkedOperator is Ownable {
     }
 
     constructor(address _base, address _token) {
-        if (_base != address(0)) {
+        if (_base == address(0)) {
             DroplinkedBase base = new DroplinkedBase();
             droplinkedBase = IDroplinkedBase(address(base));
             base.setOperator(address(this));
@@ -70,7 +70,7 @@ contract DroplinkedOperator is Ownable {
         } else {
             droplinkedBase = IDroplinkedBase(_base);
         }
-        if (_token != address(0)) {
+        if (_token == address(0)) {
             DroplinkedToken token = new DroplinkedToken();
             droplinkedToken = IDroplinkedToken(address(token));
             token.setOperator(address(this));
@@ -98,8 +98,7 @@ contract DroplinkedOperator is Ownable {
         uint256 _commission,
         uint256 amount,
         address receiver,
-        uint[] memory _beneficiaries,
-        TokenType _tokenType
+        uint[] memory _beneficiaries
     ) public {
         uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver);
         droplinkedBase.setMetadata(
@@ -107,7 +106,6 @@ contract DroplinkedOperator is Ownable {
             _commission,
             msg.sender,
             _beneficiaries,
-            _tokenType,
             tokenId
         );
     }
