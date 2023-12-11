@@ -103,14 +103,22 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         uint256 amount,
         address receiver,
         ProductType _type,
-        uint[] memory _beneficiaries
+        Beneficiary[] memory _beneficiaries
     ) public {
+        uint[] memory _beneficiaryHashes = new uint[](
+            _beneficiaries.length
+        );
+        for (uint i = 0; i < _beneficiaries.length; i++) {
+            _beneficiaryHashes[i] = droplinkedBase.addBeneficiary(
+                _beneficiaries[i]
+            );
+        }
         uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver);
         droplinkedBase.setMetadata(
             _price,
             _commission,
             msg.sender,
-            _beneficiaries,
+            _beneficiaryHashes,
             _type,
             tokenId
         );

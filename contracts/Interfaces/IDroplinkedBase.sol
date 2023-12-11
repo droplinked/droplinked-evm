@@ -29,6 +29,7 @@ struct CouponProof {
 }
 
 interface IDroplinkedBase {
+    function addBeneficiary(Beneficiary calldata beneficary) external returns (uint);
     function setRequest(Request calldata req, uint256 requestId) external;
     function getBeneficariesList(uint256 tokenId, address _owner) external view returns (uint256[] memory);
     function getBeneficiary(uint256 _hash) external view returns(Beneficiary memory);

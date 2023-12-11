@@ -13,7 +13,9 @@ contract BenficiaryManager {
 
     function addBeneficiary(Beneficiary calldata beneficary) external returns (uint){
         uint _hash = getBeneficiaryHash(beneficary);
-        require(beneficiaries[_hash].wallet == address(0), "Beneficiary already exists");
+        if (beneficiaries[_hash].wallet != address(0)){
+            return _hash;
+        }
         beneficiaries[_hash] = beneficary;
         emit BeneficiaryAdded(_hash, beneficary.isPercentage, beneficary.value, beneficary.wallet);
         return _hash;
