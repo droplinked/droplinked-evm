@@ -26,22 +26,6 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         return _tokenBeneficiaries[tokenId][_owner];
     }
 
-    // Needs to be updated ----------------
-    uint[] private _result;
-    function getSelectiveBeneficiaries(uint tokenId, address _owner, uint mode) public returns(uint[] memory){ // 0 : value | 1 : percentage
-        delete _result;
-        for(uint i = 0; i < _tokenBeneficiaries[tokenId][_owner].length; i++){
-            if(!getBeneficiary(_tokenBeneficiaries[tokenId][_owner][i]).isPercentage && mode == 0){
-                _result.push(_tokenBeneficiaries[tokenId][_owner][i]);
-            }
-            if(getBeneficiary(_tokenBeneficiaries[tokenId][_owner][i]).isPercentage && mode == 1){
-                _result.push(_tokenBeneficiaries[tokenId][_owner][i]);
-            }
-        }
-        return _result;
-    }
-    //-----------------------
-
     function setMetadata(
         uint price,
         uint commission,
@@ -59,8 +43,8 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
             if(_benef.isPercentage){
                 percentageSum += _benef.value;
             }
-            if(percentageSum > 1e4) revert InvalidSumOfDicount();
         }
+        if(percentageSum > 1e4) revert InvalidSumOfDicount();
         _types[tokenId] = _type;
     }
 
@@ -137,10 +121,6 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         uint requestId
     ) public view onlyOperator returns (bool) {
         return producerRequests[producer_account][requestId];
-    }
-
-    function getRequestCnt() public view onlyOperator returns (uint) {
-        return requestCnt;
     }
 
     function addERC20Address(address erc20contract) public onlyOperator {

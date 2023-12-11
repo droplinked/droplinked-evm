@@ -16,27 +16,26 @@ struct Request {
 }
 struct Beneficiary{
     bool isPercentage; 
-    uint value;
-    address _address;
+    uint256 value;
+    address wallet;
 }
 
 struct CouponProof {
-    uint[2] _pA;
-    uint[2][2] _pB;
-    uint[2] _pC;
-    uint[3] _pubSignals;
+    uint256[2] _pA;
+    uint256[2][2] _pB;
+    uint256[2] _pC;
+    uint256[3] _pubSignals;
     bool _provided;
 }
 
 interface IDroplinkedBase {
     function setRequest(Request calldata req, uint256 requestId) external;
-    function getBeneficariesList(uint tokenId, address _owner) external view returns (uint[] memory);
-    function getSelectiveBeneficiaries(uint tokenId, address _owner, uint mode) external returns(uint[] memory);
-    function getBeneficiary(uint _hash) external view returns(Beneficiary memory);
+    function getBeneficariesList(uint256 tokenId, address _owner) external view returns (uint256[] memory);
+    function getBeneficiary(uint256 _hash) external view returns(Beneficiary memory);
     function addCoupon(
-        uint _secretHash,
+        uint256 _secretHash,
         bool _isPercentage,
-        uint _value
+        uint256 _value
     ) external;
 
     function setIsRequested(
@@ -47,12 +46,12 @@ interface IDroplinkedBase {
     ) external;
 
     function setMetadata(
-        uint price,
-        uint commission,
+        uint256 price,
+        uint256 commission,
         address _owner,
-        uint[] memory _beneficiaries,
+        uint256[] memory _beneficiaries,
         ProductType _type,
-        uint tokenId
+        uint256 tokenId
     ) external;
 
     function setPublishersRequests(
@@ -87,7 +86,7 @@ interface IDroplinkedBase {
         uint256 requestId
     ) external view returns (bool);
 
-    function getRequestCnt() external view returns (uint256);
+    function getRequestCnt() external view returns (uint256); // todo: find a better way
 
     function setAccepted(uint256 requestId, bool acc) external;
 
@@ -100,9 +99,9 @@ interface IDroplinkedBase {
     ) external view returns (bool);
 
     function getMetadata(
-        uint tokenId,
+        uint256 tokenId,
         address _owner
-    ) external view returns (uint, uint, ProductType);
+    ) external view returns (uint256, uint256, ProductType);
 
     function checkAndGetCoupon(
         CouponProof calldata _proof

@@ -13,14 +13,13 @@ contract DroplinkedToken is ERC1155, Operatable{
     string public symbol = "DRP";
     uint16 public heartBeat = 27;
     mapping(uint => string) uris;
-    mapping(uint => mapping(address => uint)) private holders;
     uint public tokenCnt;
     mapping(bytes32 => uint) public tokenIdByHash;
     mapping(uint => uint) tokenCnts;
     event HeartBeatUpdated(uint16 newHeartBeat);
 
     function getOwnerAmount(uint tokenId, address _owner) public view returns (uint){
-        return holders[tokenId][_owner];
+        return balanceOf(_owner, tokenId);
     }
 
     function getTokenCnt() public view returns (uint){
@@ -76,12 +75,6 @@ contract DroplinkedToken is ERC1155, Operatable{
             "ERC1155: caller is not token owner or approved"
         );
         _safeBatchTransferFrom(from, to, ids, amounts, data);
-        for (uint i = 0; i < ids.length; ++i) {
-            uint id = ids[i];
-            uint amount = amounts[i];
-            holders[id][from] -= amount;
-            holders[id][to] += amount;
-        }
     }
 
     function safeTransferFrom(
@@ -98,25 +91,19 @@ contract DroplinkedToken is ERC1155, Operatable{
             );
         }
         _safeTransferFrom(from, to, id, amount, data);
-        holders[id][from] -= amount;
-        holders[id][to] += amount;
     }
 
     function mint(
         string calldata _uri,
         uint amount,
         address receiver
-    ) public returns (uint){
+    ) public onlyOperator returns (uint){
         bytes32 metadata_hash = keccak256(abi.encode(_uri));
         uint tokenId = tokenIdByHash[metadata_hash];
         if (tokenId == 0) {
             tokenId = tokenCnt + 1;
             tokenCnt++;
-            holders[tokenId][receiver] = amount;
             tokenIdByHash[metadata_hash] = tokenId;
-        }
-        else {
-            holders[tokenId][receiver] += amount;
         }
         totalSupply += amount;
         tokenCnts[tokenId] += amount;

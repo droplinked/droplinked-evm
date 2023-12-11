@@ -15,6 +15,7 @@ import "./CouponManager.sol";
 
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
+    error InvalidFee(uint fee);
     error ProductTypeMismatch();
     error AlreadyRequested();
     error RequestNotfound();
@@ -87,6 +88,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     }
 
     function setFee(uint256 _fee) public onlyOwner {
+        if (_fee > 1e4) revert InvalidFee(_fee);
         droplinkedToken.setFee(_fee);
     }
 
@@ -177,6 +179,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     }
 
     function addERC20Contract(address erc20token) public onlyOwner {
+        require(IERC20(erc20token).totalSupply() > 0, "Not a valid ERC20 contract");
         droplinkedBase.addERC20Address(erc20token);
     }
 
@@ -245,7 +248,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                     ratio
                 ) * newProductPrice) / totalProductPrice;
             }
-            payable(_beneficiary._address).transfer(__beneficiaryShare);
+            payable(_beneficiary.wallet).transfer(__beneficiaryShare);
             __producerShare -= __beneficiaryShare;
         }
         return __producerShare;
