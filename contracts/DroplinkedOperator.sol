@@ -1,10 +1,11 @@
 //// SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
-import "./IERC20.sol";
-import "./IDroplinkedToken.sol";
-import "./IDroplinkedBase.sol";
+import "./Interfaces/IERC20.sol";
+import "./Interfaces/IDroplinkedToken.sol";
+import "./Interfaces/IDroplinkedBase.sol";
 import "./DroplinkedBase.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./DroplinkedToken.sol";
@@ -12,16 +13,24 @@ import "./CouponManager.sol";
 
 // todo: support ERC20 for payment
 
-contract DroplinkedOperator is Ownable {
+contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
+    error ProductTypeMismatch();
     error AlreadyRequested();
     error RequestNotfound();
     error RequestIsAccepted();
+    error InvalidCoupon();
+    error DroplinkedShareNotIncluded();
+    error InvalidDroplinkedShare();
     error RequestIsNotAccepted();
     error NotSupportedERC20Token();
     error oldPrice();
+    error AffiliatePOD();
     error InvalidAmounts();
+    error DifferentLength();
     error InvalidCouponValue();
+    error InvalidTaxAndShippingForDigitalProducts();
+    error InvalidPublisher();
     error CouponCantBeApplied();
     error NotEnoughTokens(uint tokenId, address tokenOwner);
     error ERC20TransferFailed(uint amount, address receiver);
@@ -47,18 +56,11 @@ contract DroplinkedOperator is Ownable {
         0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78;
 
     // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
-    function getLatestPrice(uint80 roundId) public view returns (uint, uint) {
+    function getLatestPrice(uint80 roundId) internal view returns (uint, uint) {
         (, int256 price, , uint256 timestamp, ) = priceFeed.getRoundData(
             roundId
         );
         return (uint(price), timestamp);
-    }
-
-    modifier noReentrant() {
-        require(!locked, "No re-entrancy");
-        locked = true;
-        _;
-        locked = false;
     }
 
     constructor(address _base, address _token) {
@@ -98,6 +100,7 @@ contract DroplinkedOperator is Ownable {
         uint256 _commission,
         uint256 amount,
         address receiver,
+        ProductType _type,
         uint[] memory _beneficiaries
     ) public {
         uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver);
@@ -106,6 +109,7 @@ contract DroplinkedOperator is Ownable {
             _commission,
             msg.sender,
             _beneficiaries,
+            _type,
             tokenId
         );
     }
@@ -205,68 +209,6 @@ contract DroplinkedOperator is Ownable {
         return (value * percentage) / 1e4;
     }
 
-    // The most important section!
-    // No ruleset Version
-    function decentralizedPurchase(
-        uint80 roundId,
-        PurchaseData[] memory purchaseData,
-        DirectPurchaseData[] memory directPurchase,
-        uint tax,
-        uint shipping,
-        address _fromAddress,
-        CouponProof calldata _proof
-    ) public payable noReentrant {
-        (uint ratio, uint timestamp) = getLatestPrice(roundId);
-        if (
-            block.timestamp > timestamp &&
-            block.timestamp - timestamp >
-            2 * uint(droplinkedToken.getHeartBeat())
-        ) revert oldPrice();
-        if (_proof._provided) {
-            // Coupon Provided
-            Coupon memory coupon = droplinkedBase.checkAndGetCoupon(_proof);
-            if (coupon.isPercentage) {
-                // Percent based
-                if (coupon.value > 1e4) revert InvalidCouponValue();
-                _purchase(
-                    ratio,
-                    purchaseData,
-                    directPurchase,
-                    tax,
-                    shipping,
-                    coupon.value,
-                    _fromAddress,
-                    true
-                );
-                return;
-            } else {
-                // Value based
-                _purchase(
-                    ratio,
-                    purchaseData,
-                    directPurchase,
-                    tax,
-                    shipping,
-                    coupon.value,
-                    _fromAddress,
-                    false
-                );
-            }
-        } else {
-            // Coupon Not provided
-            _purchase(
-                ratio,
-                purchaseData,
-                directPurchase,
-                tax,
-                shipping,
-                0,
-                _fromAddress,
-                false
-            );
-        }
-    }
-
     function _applyCoupon(
         uint totalProductPrice,
         bool isPercentage,
@@ -290,122 +232,162 @@ contract DroplinkedOperator is Ownable {
         return newProductPrice;
     }
 
-    function _purchase(
-        uint ratio,
-        PurchaseData[] memory purchaseData,
-        DirectPurchaseData[] memory directPurchase,
-        uint tax,
-        uint shipping,
-        uint creditValue,
-        address _fromAddress,
-        bool isDiscount
-    ) private {
+    function _payBeneficiaries(uint[] memory beneficiaries, uint _productETHPrice, uint amount, uint ratio, uint totalProductPrice, uint newProductPrice, uint __producerShare) private returns(uint){
+        for (uint j = 0; j < beneficiaries.length; j++) {
+            Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(beneficiaries[j]);
+            uint __beneficiaryShare = 0;
+            if (_beneficiary.isPercentage){
+                    __beneficiaryShare = applyPercentage(_productETHPrice, _beneficiary.value); 
+            } else {
+                // value based beneficiary, convert to eth and transfer
+                __beneficiaryShare = (toETHPrice(
+                    _beneficiary.value * amount,
+                    ratio
+                ) * newProductPrice) / totalProductPrice;
+            }
+            payable(_beneficiary._address).transfer(__beneficiaryShare);
+            __producerShare -= __beneficiaryShare;
+        }
+        return __producerShare;
+    }
+
+    // affiliate products must have same publisher => done
+    // non recorded products are free => done
+    // note with checking coupon => coupon can only be applied to products that the owner has published the coupon with
+    // note => emit events after payments are done!
+
+    function recordedPurchase(uint80 roundId, uint[] memory tokenIds, uint[] memory amounts,uint _tax, uint _shipping, address fromAddress, CouponProof calldata proof) public payable{
+        // todo: move the beneficiary giving to another function for clearity & reuse!
+        require (amounts.length == tokenIds.length, "Different length of tokens and amounts"); 
+        require(tokenIds.length != 0, "No items in cart");
+        // get price ratio and check if roundId is valid (not past of 2 heartbeats)
+        
+        (uint ratio, uint timestamp) = getLatestPrice(roundId);
+        if (
+            block.timestamp > timestamp &&
+            block.timestamp - timestamp >
+            2 * uint(droplinkedToken.getHeartBeat())
+        ) revert oldPrice();
+
+        bool isDiscount = false;
+        (,, ProductType _type) = droplinkedBase.getMetadata(tokenIds[0], fromAddress);        
+        uint _couponValue = 0;
+        // validate coupon and get _couponValue from it
+        if (proof._provided){
+            Coupon memory coupon = droplinkedBase.checkAndGetCoupon(proof);
+            if (coupon.couponProducer != fromAddress) revert InvalidCoupon();
+            isDiscount = coupon.isPercentage;
+            _couponValue = coupon.value;
+            if (coupon.couponProducer != fromAddress) revert InvalidCoupon();
+        }
+        // Since this is the recorded products, the affiliate check for coupon is redundant
+        // if (affiliate & creditValue > 0) revert CannotApplyCoupon();
+
+        uint tax = toETHPrice(_tax, ratio);
+        uint shipping = toETHPrice(_shipping, ratio);
+
         uint totalProductPrice = msg.value - toETHPrice(shipping + tax, ratio);
-        uint newProductPrice = _applyCoupon(
-            totalProductPrice,
-            isDiscount,
-            creditValue,
-            ratio
-        );
+        uint newProductPrice = _applyCoupon(totalProductPrice, isDiscount, _couponValue, ratio);
         uint fee = droplinkedToken.getFee();
 
-        for (uint i = 0; i < purchaseData.length; i++) {
-            PurchaseData memory pdata = purchaseData[i];
-            address _producer;
-            address _publisher;
-            uint _tokenId = 0;
-            // INITIAL SECTION---------------------------------------------------
-            if (pdata.isAffiliate) {
-                if (creditValue != 0) revert CouponCantBeApplied();
-                Request memory _req = droplinkedBase.getRequest(
-                    pdata.requestId
-                );
-                if (!_req.accepted) revert RequestIsNotAccepted();
-                _producer = _req.producer;
-                _publisher = _req.publisher;
-                if (_publisher != _fromAddress) revert InvalidFromAddress();
-                _tokenId = _req.tokenId;
-            } else {
-                _producer = _fromAddress;
-                _publisher = msg.sender; // does not matter
-                _tokenId = pdata.tokenId;
-                if (_producer != _fromAddress) revert InvalidFromAddress();
-            }
-            (uint _productPrice, uint _commission) = droplinkedBase.getMetadata(
-                _tokenId,
-                _producer
-            );
+        for (uint i = 0; i < tokenIds.length; i++) {
+            // no commission in recorded payment, only the type of the product an its price matters, also if the types are different revert
+            (uint _productPrice,, ProductType _productType) = droplinkedBase.getMetadata(tokenIds[i],fromAddress);
+            if (_productType != _type) revert ProductTypeMismatch();
+            // calculate the product price based on the ratio and the coupon
             uint _productETHPrice = (toETHPrice(
-                _productPrice * pdata.amount,
+                _productPrice * amounts[i],
                 ratio
             ) * newProductPrice) / totalProductPrice;
-            uint __publisherShare = applyPercentage(
-                _productETHPrice,
-                _commission
-            );
+            uint __producerShare = _productETHPrice;
             uint __droplinkedShare = applyPercentage(_productETHPrice, fee);
-            payable(_publisher).transfer(__publisherShare);
             payable(droplinkedWallet).transfer(__droplinkedShare);
-            uint __productPriceWithoutPublisher = _productETHPrice -
-                __publisherShare -
-                __droplinkedShare;
-
-            // BENEFICIARY SECTION------------------------------------------------
-            // iterate over benficiaries
-            uint[] memory _valueBasedBeneficiaries = droplinkedBase
-                .getSelectiveBeneficiaries(_tokenId, _producer, 0);
-            uint[] memory _percentBasedBeneficiaries = droplinkedBase
-                .getSelectiveBeneficiaries(_tokenId, _producer, 1);
-            // Handle value based beneficiaries
-            for (uint j = 0; j < _valueBasedBeneficiaries.length; j++) {
-                Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(
-                    _valueBasedBeneficiaries[j]
-                );
-                uint __beneficiaryAmount = toETHPrice(
-                    _beneficiary.value,
-                    ratio
-                );
-                payable(_beneficiary._address).transfer(__beneficiaryAmount);
-                if (__beneficiaryAmount > __productPriceWithoutPublisher)
-                    revert InvalidAmounts();
-                __productPriceWithoutPublisher -= __beneficiaryAmount;
-            }
-            // Handle percentage based beneficiaries
-            for (uint j = 0; j < _percentBasedBeneficiaries.length; j++) {
-                Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(
-                    _percentBasedBeneficiaries[j]
-                );
-                uint __beneficiaryAmount = applyPercentage(
-                    __productPriceWithoutPublisher,
-                    _beneficiary.value
-                );
-                payable(_beneficiary._address).transfer(__beneficiaryAmount);
-                __productPriceWithoutPublisher -= __beneficiaryAmount;
-            }
-            // --------------------------------------------------------------------
-
-            // Transfer NFT section
-            if (
-                droplinkedToken.getOwnerAmount(_tokenId, _fromAddress) <
-                pdata.amount
-            ) revert NotEnoughTokens(_tokenId, _fromAddress);
-            droplinkedToken.safeTransferFrom(
-                _fromAddress,
-                msg.sender,
-                _tokenId,
-                pdata.amount,
-                ""
-            );
+            __producerShare -= __droplinkedShare;
+            __producerShare = _payBeneficiaries(droplinkedBase.getBeneficariesList(tokenIds[i], fromAddress), _productETHPrice, amounts[i], ratio, totalProductPrice, newProductPrice, __producerShare);
+            payable(fromAddress).transfer(__producerShare);
+            // transfer nfts after payment
+            // check if the producer has amounts[i] from tokenIds[i]:
+            if (droplinkedToken.getOwnerAmount(tokenIds[i], fromAddress) < amounts[i]) revert NotEnoughTokens(tokenIds[i], fromAddress);
+            droplinkedToken.safeTransferFrom(fromAddress, msg.sender, tokenIds[i], amounts[i], "");
         }
-        // Handle Direct payment data
-        for (uint i = 0; i < directPurchase.length; i++) {
-            DirectPurchaseData memory dpd = directPurchase[i];
-            uint _productETHPrice = toETHPrice(dpd.amount * dpd.price, ratio);
-            // just send the product price to the _fromAddress, nothing else is needed (?)
-            payable(_fromAddress).transfer(_productETHPrice);
+        // tax & shipping part
+        if (_type == ProductType.POD){
+            // tax & shipping is for droplinked
+            payable(droplinkedWallet).transfer(tax + shipping);
+        } else if (_type == ProductType.PHYSICAL){
+            // tax & shipping is for producer
+            payable(fromAddress).transfer(tax + shipping);
+        } else if (_type == ProductType.DIGITAL){
+            // digital products are free of tax & shipping, so if they were not zero, revert
+            if (tax != 0 || shipping != 0) revert InvalidTaxAndShippingForDigitalProducts();
         }
-        // Transfer the tax & shipping to producer
-        payable(_fromAddress).transfer(tax + shipping);
+    }
+
+    // tax and shipping must be included in values and recievers
+    // the prices are given as usd amount * 100
+    function nonRecordedPurchase(uint80 roundId, uint[] memory values, address[] memory receivers) public payable nonReentrant{
+        if (values.length != receivers.length) revert DifferentLength();
+        // transfer 1% to the droplinked wallet (it should be included in values[0], _recivers[0])
+        (uint ratio, uint timestamp) = getLatestPrice(roundId);
+        if (
+            block.timestamp > timestamp &&
+            block.timestamp - timestamp >
+            2 * uint(droplinkedToken.getHeartBeat())
+        ) revert oldPrice();
+        if (receivers[0] != droplinkedWallet) revert DroplinkedShareNotIncluded();
+        if ((msg.value/100) > toETHPrice(values[0], ratio)) revert InvalidDroplinkedShare();
+        for (uint i = 0; i < values.length; i++) {
+            payable(receivers[i]).transfer(toETHPrice(values[i], ratio));
+        }
+    }
+
+    // no coupon for affiliate payment
+    function affiliatePurchase(uint80 roundId, uint[] memory requestIds, uint[] memory amounts, address publisher, uint _tax, uint _shipping) public payable nonReentrant{
+        if (requestIds.length != amounts.length) revert DifferentLength();
+        (uint ratio, uint timestamp) = getLatestPrice(roundId);
+        if (
+            block.timestamp > timestamp &&
+            block.timestamp - timestamp >
+            2 * uint(droplinkedToken.getHeartBeat())
+        ) revert oldPrice();
+        uint fee = droplinkedToken.getFee();
+        uint tax = toETHPrice(_tax, ratio);
+        uint shipping = toETHPrice(_shipping, ratio);
+        uint totalProductPrice = msg.value - toETHPrice(shipping + tax, ratio);
+        Request memory req = droplinkedBase.getRequest(requestIds[0]);
+        (,, ProductType _type) = droplinkedBase.getMetadata(req.tokenId, req.producer);
+        if (_type == ProductType.POD) revert AffiliatePOD();
+        for (uint i = 0; i < requestIds.length; i++) {
+            req = droplinkedBase.getRequest(requestIds[i]);
+            if (req.publisher != publisher) revert InvalidPublisher();
+            (uint _productPrice,uint _commission, ProductType _productType) = droplinkedBase.getMetadata(req.tokenId, req.producer);
+            if (_productType != _type) revert ProductTypeMismatch();
+            uint _productETHPrice = (toETHPrice(
+                _productPrice * amounts[i],
+                ratio
+            ));
+            uint __producerShare = _productETHPrice;
+            uint __publisherShare = applyPercentage(_productETHPrice, _commission);
+            __producerShare -= __publisherShare;
+            uint __droplinkedShare = applyPercentage(_productETHPrice, fee);
+            payable(droplinkedWallet).transfer(__droplinkedShare);
+            __producerShare -= __droplinkedShare;
+            __producerShare = _payBeneficiaries(droplinkedBase.getBeneficariesList(req.tokenId, req.producer), _productETHPrice, amounts[i], ratio, totalProductPrice, totalProductPrice, __producerShare);
+            payable(req.producer).transfer(__producerShare);
+            payable(publisher).transfer(__publisherShare);
+            // transfer nfts after payment
+            // check if the producer has amounts[i] from tokenIds[i]:
+            if (droplinkedToken.getOwnerAmount(req.tokenId, req.producer) < amounts[i]) revert NotEnoughTokens(req.tokenId, req.producer);
+            droplinkedToken.safeTransferFrom(req.producer, msg.sender, req.tokenId, amounts[i], "");
+        }
+        // tax & shipping part, for POD it was checked before
+        if (_type == ProductType.PHYSICAL){
+            // tax & shipping is for producer
+            payable(req.producer).transfer(tax + shipping);
+        } else if (_type == ProductType.DIGITAL){
+            // digital products are free of tax & shipping, so if they were not zero, revert
+            if (tax != 0 || shipping != 0) revert InvalidTaxAndShippingForDigitalProducts();
+        }
     }
 
     function withdraw() public onlyOwner {

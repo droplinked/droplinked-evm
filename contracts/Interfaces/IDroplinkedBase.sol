@@ -1,6 +1,13 @@
 //// SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
-import "./CouponManager.sol";
+import "../CouponManager.sol";
+
+enum ProductType {
+    DIGITAL,
+    POD,
+    PHYSICAL
+}
+
 struct Request {
     uint256 tokenId;
     address producer;
@@ -44,6 +51,7 @@ interface IDroplinkedBase {
         uint commission,
         address _owner,
         uint[] memory _beneficiaries,
+        ProductType _type,
         uint tokenId
     ) external;
 
@@ -94,7 +102,7 @@ interface IDroplinkedBase {
     function getMetadata(
         uint tokenId,
         address _owner
-    ) external view returns (uint, uint);
+    ) external view returns (uint, uint, ProductType);
 
     function checkAndGetCoupon(
         CouponProof calldata _proof

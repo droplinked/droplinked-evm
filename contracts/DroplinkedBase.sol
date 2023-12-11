@@ -4,7 +4,7 @@ pragma solidity 0.8.18;
 import "./CouponManager.sol";
 import "./Operatable.sol";
 import "./BeneficiaryManager.sol";
-import "./IDroplinkedBase.sol";
+import "./Interfaces/IDroplinkedBase.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
@@ -17,6 +17,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     // metadatas
     mapping(uint => mapping(address => uint)) public _prices;
     mapping(uint => mapping(address => uint)) public _commissions;
+    mapping(uint => ProductType) public _types;
     mapping(uint => mapping(address => uint[])) public _tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
     //
     mapping(address => bool) public erc20Addresses;
@@ -46,6 +47,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         uint commission,
         address _owner,
         uint[] memory _beneficiaries,
+        ProductType _type,
         uint tokenId
     ) public onlyOperator {
         _prices[tokenId][_owner] = price;
@@ -59,13 +61,14 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
             }
             if(percentageSum > 1e4) revert InvalidSumOfDicount();
         }
+        _types[tokenId] = _type;
     }
 
     function getMetadata(
         uint tokenId,
         address _owner
-    ) public view onlyOperator returns (uint, uint) {
-        return (_prices[tokenId][_owner], _commissions[tokenId][_owner]);
+    ) public view onlyOperator returns (uint, uint, ProductType) {
+        return (_prices[tokenId][_owner], _commissions[tokenId][_owner], _types[tokenId]);
     }
 
     function setRequest(
