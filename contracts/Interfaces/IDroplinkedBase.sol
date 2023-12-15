@@ -25,7 +25,7 @@ struct CouponProof {
     uint256[2][2] _pB;
     uint256[2] _pC;
     uint256[3] _pubSignals;
-    bool _provided;
+    bool provided;
 }
 
 interface IDroplinkedBase {
@@ -52,7 +52,8 @@ interface IDroplinkedBase {
         address _owner,
         uint256[] memory _beneficiaries,
         ProductType _type,
-        uint256 tokenId
+        uint256 tokenId,
+        address _paymentWallet
     ) external;
 
     function setPublishersRequests(
@@ -102,7 +103,7 @@ interface IDroplinkedBase {
     function getMetadata(
         uint256 tokenId,
         address _owner
-    ) external view returns (uint256, uint256, ProductType);
+    ) external view returns (uint256, uint256, ProductType, address);
 
     function checkAndGetCoupon(
         CouponProof calldata _proof

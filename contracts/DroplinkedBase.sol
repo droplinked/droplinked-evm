@@ -20,7 +20,8 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     mapping(uint => ProductType) public _types;
     mapping(uint => mapping(address => uint[])) public _tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
     //
-    mapping(address => bool) public erc20Addresses;
+    mapping(address => bool) public erc20addresses;
+    mapping(address => address) public paymentWallets;
 
     function getBeneficariesList(uint tokenId, address _owner) public view returns (uint[] memory){
         return _tokenBeneficiaries[tokenId][_owner];
@@ -32,7 +33,8 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         address _owner,
         uint[] memory _beneficiaries,
         ProductType _type,
-        uint tokenId
+        uint tokenId,
+        address _paymentWallet
     ) public onlyOperator {
         _prices[tokenId][_owner] = price;
         _commissions[tokenId][_owner] = commission;
@@ -46,13 +48,14 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         }
         if(percentageSum > 1e4) revert InvalidSumOfDicount();
         _types[tokenId] = _type;
+        paymentWallets[_owner] = _paymentWallet;
     }
 
     function getMetadata(
         uint tokenId,
         address _owner
-    ) public view onlyOperator returns (uint, uint, ProductType) {
-        return (_prices[tokenId][_owner], _commissions[tokenId][_owner], _types[tokenId]);
+    ) public view onlyOperator returns (uint, uint, ProductType, address) {
+        return (_prices[tokenId][_owner], _commissions[tokenId][_owner], _types[tokenId], paymentWallets[_owner]);
     }
 
     function setRequest(
@@ -123,17 +126,17 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         return producerRequests[producer_account][requestId];
     }
 
-    function addERC20Address(address erc20contract) public onlyOperator {
-        erc20Addresses[erc20contract] = true;
+    function addERC20address(address erc20contract) public onlyOperator {
+        erc20addresses[erc20contract] = true;
     }
 
-    function removeERC20Address(address erc20contract) public onlyOperator {
-        erc20Addresses[erc20contract] = false;
+    function removeERC20address(address erc20contract) public onlyOperator {
+        erc20addresses[erc20contract] = false;
     }
 
-    function isERC20AddressIncluded(
+    function isERC20addressIncluded(
         address erc20contract
     ) public view onlyOperator returns (bool) {
-        return erc20Addresses[erc20contract];
+        return erc20addresses[erc20contract];
     }
 }
