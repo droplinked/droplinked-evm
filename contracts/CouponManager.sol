@@ -33,7 +33,7 @@ contract CouponManager is CouponVerifier{
         
         emit CouponAdded(_secretHash, _isPercentage, _value, msg.sender);
     }
-
+    
     function removeCoupon(uint secretHash) external {
         require(couponAvailable(secretHash), "Coupon hash does not exist");
         require(coupons[secretHash].couponProducer == msg.sender, "Only producer can remove a coupon");

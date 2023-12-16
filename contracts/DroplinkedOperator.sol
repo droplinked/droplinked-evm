@@ -12,8 +12,7 @@ import "./DroplinkedToken.sol";
 import "./CouponManager.sol";
 
 // todo: support ERC20 for payment
-// todo: Manage Wallet for NFT transfers
-// todo: Retrieval functionality for failed purchases (i.e. Wathcer detects fraud amounts in purchase TBD values)
+// todo: set new metadata for transfered NFT
 
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
@@ -40,6 +39,8 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     event DeployedBase(address _droplinkedBase);
     event DeployedToken(address _droplinkedToken);
     event Purchase(string memo);
+    event ERC20PaymentAdded(address tokenAddress);
+    event ERC20PaymentRemoved(address removedToken);
 
     IDroplinkedToken public droplinkedToken;
     IDroplinkedBase public droplinkedBase;
@@ -48,9 +49,8 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     // Polygon Mumbai: 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
     // Polygon: 0xAB594600376Ec9fD91F8e885dADF0CE036862dE0
     AggregatorV3Interface internal immutable priceFeed = AggregatorV3Interface(0xAB594600376Ec9fD91F8e885dADF0CE036862dE0);
-
     address public immutable droplinkedWallet = 0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78;
-
+    
     // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
     function getLatestPrice(uint80 roundId) internal view returns (uint, uint) {
         (, int256 price, , uint256 timestamp, ) = priceFeed.getRoundData(
@@ -99,7 +99,8 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         address receiver,
         ProductType _type,
         address _paymentWallet,
-        Beneficiary[] memory _beneficiaries
+        Beneficiary[] memory _beneficiaries,
+        bool acceptedManageWallet
     ) public {
         uint[] memory _beneficiaryHashes = new uint[](
             _beneficiaries.length
@@ -109,7 +110,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 _beneficiaries[i]
             );
         }
-        uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver);
+        uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver, acceptedManageWallet);
         droplinkedBase.setMetadata(
             _price,
             _commission,
@@ -148,7 +149,6 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     function approve_request(uint256 requestId) public {
         if (!droplinkedBase.getProducersRequests(msg.sender, requestId))
             revert RequestNotfound();
-
         droplinkedBase.setAccepted(requestId, true);
         emit AcceptRequest(requestId);
     }
@@ -186,27 +186,15 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     function addERC20Contract(address erc20token) public onlyOwner {
         require(IERC20(erc20token).totalSupply() > 0, "Not a valid ERC20 contract");
         droplinkedBase.addERC20Address(erc20token);
+        emit ERC20PaymentAdded(erc20token);
     }
 
     function removeERC20Contract(address erc20token) public onlyOwner {
         droplinkedBase.removeERC20Address(erc20token);
+        emit ERC20PaymentRemoved(erc20token);
     }
 
-    struct PurchaseData {
-        // ==> For affiliate and recorded products
-        uint tokenId;
-        uint amount;
-        uint requestId;
-        bool isAffiliate;
-    }
-
-    struct DirectPurchaseData {
-        // ==> For direct payment and non recorded products
-        uint amount;
-        uint price; // 100x
-    }
-
-    function toETHPrice(uint value, uint ratio) public pure returns (uint) {
+    function toETHPrice(uint value, uint ratio) private pure returns (uint) {
         return (1e24 * value) / ratio;
     }
 
@@ -247,6 +235,11 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         }
     }
 
+    function setMetadataForTransferedProduct(uint price, uint commission, address paymentWallet, Beneficiary[] memory _beneficiaries, uint tokenId) public {
+        address owner = msg.sender;
+        // droplinkedBase.setPartialMetadata(); --> to be done
+    }
+
     function droplinkedPurchase(address _shop, uint80 chainLinkRoundId, uint totalTaxAndShipping, uint[] memory tbdValues, address[] memory tbdReceivers, PurchaseData[] memory cartItems, CouponProof memory proof, string memory memo) public payable nonReentrant{
         // initial checks
         if (tbdReceivers.length != tbdValues.length) revert DifferentLength();
@@ -278,7 +271,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             uint __producerShare = 0;
             if (item.isAffiliate){
                 if(creditValue != 0) revert CouponCantBeApplied();
-                Request memory request = droplinkedBase.getRequest(item.requestId);
+                Request memory request = droplinkedBase.getRequest(item.id);
                 if(!request.accepted) revert RequestIsNotAccepted();
                 if (_publisher != _shop) revert InvalidFromAddress();
                 _producer = request.producer;
@@ -286,9 +279,9 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 tokenId = request.tokenId;
             } else {
                 _producer = _shop;
-                tokenId = item.tokenId;
+                tokenId = item.id;
             }
-            (uint _productPrice, uint _commission, ProductType _type, address _paymentWallet) = droplinkedBase.getMetadata(tokenId, _producer);
+            (uint _productPrice, uint _commission, ProductType _type, address _paymentWallet) = droplinkedBase.getMetadata(tokenId, _producer); // <-- would fail if the metadata is not found for that product (not set)
             if (_type == ProductType.POD && _publisher != address(0)) revert AffiliatePOD();
             _productETHPrice = (toETHPrice(_productPrice * item.amount, ratio) * newProductsPrice) / totalProductsPrice;
             __producerShare = _productETHPrice;
@@ -299,11 +292,12 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             totalIncome -= __publisherShare + __droplinkedShare;
             __producerShare -= __publisherShare + __droplinkedShare;
             // now pay the benficiaries
-            (__producerShare, totalIncome) = _payBeneficiaries(droplinkedBase.getBeneficariesList(item.tokenId, _shop), _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare, totalIncome);
+            (__producerShare, totalIncome) = _payBeneficiaries(droplinkedBase.getBeneficariesList(tokenId, _shop), _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare, totalIncome);
             payable(_paymentWallet).transfer(__producerShare);
-            if (droplinkedToken.getOwnerAmount(item.tokenId, _shop) < item.amount) revert NotEnoughTokens(item.tokenId, _shop);
-            droplinkedToken.safeTransferFrom(_shop, msg.sender, item.tokenId, item.amount, "");
-            // set the new metadata for transfered NFT for compatibilite : TODO
+            if (droplinkedToken.getOwnerAmount(tokenId, _shop) < item.amount) revert NotEnoughTokens(tokenId, _shop);
+            droplinkedToken.safeTransferFrom(_shop, msg.sender, tokenId, item.amount, "");
+            // SET NEW METADATA HERE
+            // the product must not be purchaseable after transfer, until the owner specifies the new price and commission & beneficiaries and paymentWallet (_type and tokenId will remain the same)
         }
         payable(droplinkedWallet).transfer(totalIncome);
         emit Purchase(memo);

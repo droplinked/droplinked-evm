@@ -28,6 +28,12 @@ struct CouponProof {
     bool provided;
 }
 
+struct PurchaseData {
+    uint id;
+    uint amount;
+    bool isAffiliate;
+}
+
 interface IDroplinkedBase {
     function addBeneficiary(Beneficiary calldata beneficary) external returns (uint);
     function setRequest(Request calldata req, uint256 requestId) external;
@@ -38,6 +44,8 @@ interface IDroplinkedBase {
         bool _isPercentage,
         uint256 _value
     ) external;
+
+    function removeCoupon(uint secretHash) external;
 
     function setIsRequested(
         address producer_account,

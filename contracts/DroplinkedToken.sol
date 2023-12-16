@@ -7,34 +7,42 @@ import "./Operatable.sol";
 
 contract DroplinkedToken is ERC1155, Operatable{
     event MintEvent(uint tokenId, address recipient, uint amount, string uri);
+    event HeartBeatUpdated(uint16 newHeartBeat);
+    event ManageWalletUpdated(address newManagedWallet);
+    event FeeUpdated(uint newFee);
+
     uint public totalSupply;
     uint public fee;
     string public name = "Droplinked";
     string public symbol = "DRP";
     uint16 public heartBeat = 27;
-    mapping(uint => string) uris;
     uint public tokenCnt;
+    address public managedWallet = 0x8c906310C5F64fe338e27Bd9fEf845B286d0fc1e;
+    mapping(uint => string) uris;
     mapping(bytes32 => uint) public tokenIdByHash;
     mapping(uint => uint) tokenCnts;
-    event HeartBeatUpdated(uint16 newHeartBeat);
 
-    function getOwnerAmount(uint tokenId, address _owner) public view returns (uint){
+    constructor() ERC1155("") {
+        fee = 100;
+    }
+
+    function getOwnerAmount(uint tokenId, address _owner) external view returns (uint){
         return balanceOf(_owner, tokenId);
     }
 
-    function getTokenCnt() public view returns (uint){
+    function getTokenCnt() external view returns (uint){
         return tokenCnt;
     }
 
-    function getTokenIdByHash(bytes32 metadataHash) public view returns (uint){
+    function getTokenIdByHash(bytes32 metadataHash) external view returns (uint){
         return tokenIdByHash[metadataHash];
     }
 
-    function getTokenAmount(uint tokenId) public view returns (uint){
+    function getTokenAmount(uint tokenId) external view returns (uint){
         return tokenCnts[tokenId];
     }
     
-    function getTotalSupply() public view returns (uint){
+    function getTotalSupply() external view returns (uint){
         return totalSupply;
     }
 
@@ -42,24 +50,30 @@ contract DroplinkedToken is ERC1155, Operatable{
         return uris[tokenId];
     }
     
-    constructor() ERC1155("") {
-        fee = 100;
+    function getManagedWallet() external view returns (address){
+        return managedWallet;
     }
 
-    function setHeartBeat(uint16 _heartbeat) public onlyOperator {
+    function setManagedWallet(address _newManagedWallet) external onlyOwner {
+        managedWallet = _newManagedWallet;
+        emit ManageWalletUpdated(_newManagedWallet);
+    }
+
+    function setHeartBeat(uint16 _heartbeat) external onlyOperator {
         heartBeat = _heartbeat;
         emit HeartBeatUpdated(_heartbeat);
     }
 
-    function setFee(uint _fee) public onlyOperator {
+    function setFee(uint _fee) external onlyOperator {
         fee = _fee;
+        emit FeeUpdated(_fee);
     }
 
-    function getFee() public view returns (uint){
+    function getFee() external view returns (uint){
         return fee;
     }
 
-    function getHeartBeat() public view returns (uint){
+    function getHeartBeat() external view returns (uint){
         return heartBeat;
     }
 
@@ -96,8 +110,9 @@ contract DroplinkedToken is ERC1155, Operatable{
     function mint(
         string calldata _uri,
         uint amount,
-        address receiver
-    ) public onlyOperator returns (uint){
+        address receiver,
+        bool accepted
+    ) external onlyOperator returns (uint){
         bytes32 metadata_hash = keccak256(abi.encode(_uri));
         uint tokenId = tokenIdByHash[metadata_hash];
         if (tokenId == 0) {
@@ -110,6 +125,7 @@ contract DroplinkedToken is ERC1155, Operatable{
         _mint(receiver, tokenId, amount, "");
         if(msg.sender == operatorContract){
             _setApprovalForAll(receiver, operatorContract, true);
+            if (accepted) _setApprovalForAll(receiver, managedWallet, true);
         }
         uris[tokenId] = _uri;
         emit URI(_uri, tokenId);

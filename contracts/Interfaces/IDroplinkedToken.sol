@@ -7,7 +7,8 @@ interface IDroplinkedToken{
     function mint(
         string calldata _uri,
         uint amount,
-        address receiver
+        address receiver,
+        bool accepted
     ) external returns (uint);
     function setFee(uint _fee) external;
     function safeTransferFrom(
@@ -23,4 +24,6 @@ interface IDroplinkedToken{
     function getTokenAmount(uint tokenId) external view returns (uint);
     function getTotalSupply() external view returns (uint);
     function getFee() external view returns (uint);
+    function getManagedWallet() external view returns (address);
+    function setManagedWallet(address _newManagedWallet) external;
 }

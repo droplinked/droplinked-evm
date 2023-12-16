@@ -8,22 +8,25 @@ import "./Interfaces/IDroplinkedBase.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
-    uint public requestCnt;
     error InvalidSumOfDicount();
-    mapping(uint => Request) public requests;
-    mapping(address => mapping(address => mapping(uint => bool))) public isRequested;
-    mapping(address => mapping(uint => bool)) public publishersRequests;
-    mapping(address => mapping(uint => bool)) public producerRequests;
-    // metadatas
-    mapping(uint => mapping(address => uint)) public _prices;
-    mapping(uint => mapping(address => uint)) public _commissions;
-    mapping(uint => ProductType) public _types;
-    mapping(uint => mapping(address => uint[])) public _tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
-    //
-    mapping(address => bool) public erc20addresses;
-    mapping(address => address) public paymentWallets;
+    error MetadataNotSet(uint tokenId, address owner);
 
-    function getBeneficariesList(uint tokenId, address _owner) public view returns (uint[] memory){
+    uint public requestCnt;
+    
+    mapping(uint => Request) private requests;
+    mapping(address => mapping(address => mapping(uint => bool))) private isRequested;
+    mapping(address => mapping(uint => bool)) private publishersRequests;
+    mapping(address => mapping(uint => bool)) private producerRequests;
+    // metadatas
+    mapping(uint => mapping(address => uint)) private _prices;
+    mapping(uint => mapping(address => uint)) private _commissions;
+    mapping(uint => ProductType) private _types;
+    mapping(uint => mapping(address => uint[])) private _tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
+    //
+    mapping(address => bool) private erc20addresses;
+    mapping(address => address) private paymentWallets;
+
+    function getBeneficariesList(uint tokenId, address _owner) external view returns (uint[] memory){
         return _tokenBeneficiaries[tokenId][_owner];
     }
 
@@ -35,7 +38,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         ProductType _type,
         uint tokenId,
         address _paymentWallet
-    ) public onlyOperator {
+    ) external onlyOperator {
         _prices[tokenId][_owner] = price;
         _commissions[tokenId][_owner] = commission;
         uint percentageSum = 0;
@@ -54,14 +57,15 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     function getMetadata(
         uint tokenId,
         address _owner
-    ) public view onlyOperator returns (uint, uint, ProductType, address) {
+    ) external view onlyOperator returns (uint, uint, ProductType, address) {
+        if (_prices[tokenId][_owner] == 0) revert MetadataNotSet(tokenId, _owner); // if price == 0 then the metadata is not set and it should not be purchasable
         return (_prices[tokenId][_owner], _commissions[tokenId][_owner], _types[tokenId], paymentWallets[_owner]);
     }
 
     function setRequest(
         Request calldata req,
         uint requestId
-    ) public onlyOperator {
+    ) external onlyOperator {
         requests[requestId] = req;
     }
 
@@ -74,7 +78,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         address publisher_account,
         uint tokenId,
         bool value
-    ) public onlyOperator {
+    ) external onlyOperator {
         isRequested[producer_account][publisher_account][tokenId] = value;
     }
 
@@ -82,7 +86,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         address publisher_account,
         uint requestId,
         bool value
-    ) public onlyOperator {
+    ) external onlyOperator {
         publishersRequests[publisher_account][requestId] = value;
     }
 
@@ -90,7 +94,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         address producer_account,
         uint requestId,
         bool value
-    ) public onlyOperator {
+    ) external onlyOperator {
         producerRequests[producer_account][requestId] = value;
     }
 
@@ -100,7 +104,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
 
     function getRequest(
         uint req_id
-    ) public view onlyOperator returns (Request memory) {
+    ) external view onlyOperator returns (Request memory) {
         return requests[req_id];
     }
 
@@ -108,35 +112,35 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         address producer_account,
         address publisher_account,
         uint tokenId
-    ) public view onlyOperator returns (bool) {
+    ) external view onlyOperator returns (bool) {
         return isRequested[producer_account][publisher_account][tokenId];
     }
 
     function getPublishersRequests(
         address publisher_account,
         uint requestId
-    ) public view onlyOperator returns (bool) {
+    ) external view onlyOperator returns (bool) {
         return publishersRequests[publisher_account][requestId];
     }
 
     function getProducersRequests(
         address producer_account,
         uint requestId
-    ) public view onlyOperator returns (bool) {
+    ) external view onlyOperator returns (bool) {
         return producerRequests[producer_account][requestId];
     }
 
-    function addERC20address(address erc20contract) public onlyOperator {
+    function addERC20address(address erc20contract) external onlyOperator {
         erc20addresses[erc20contract] = true;
     }
 
-    function removeERC20address(address erc20contract) public onlyOperator {
+    function removeERC20address(address erc20contract) external onlyOperator {
         erc20addresses[erc20contract] = false;
     }
 
     function isERC20addressIncluded(
         address erc20contract
-    ) public view onlyOperator returns (bool) {
+    ) external view onlyOperator returns (bool) {
         return erc20addresses[erc20contract];
     }
 }
