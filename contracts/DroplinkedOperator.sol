@@ -16,6 +16,7 @@ import "./CouponManager.sol";
 
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
+    error CannotChangeMetata();
     error InvalidFee(uint fee);
     error AlreadyRequested();
     error RequestNotfound();
@@ -235,11 +236,6 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         }
     }
 
-    function setMetadataForTransferedProduct(uint price, uint commission, address paymentWallet, Beneficiary[] memory _beneficiaries, uint tokenId) public {
-        address owner = msg.sender;
-        // droplinkedBase.setPartialMetadata(); --> to be done
-    }
-
     function droplinkedPurchase(address _shop, uint80 chainLinkRoundId, uint totalTaxAndShipping, uint[] memory tbdValues, address[] memory tbdReceivers, PurchaseData[] memory cartItems, CouponProof memory proof, string memory memo) public payable nonReentrant{
         // initial checks
         if (tbdReceivers.length != tbdValues.length) revert DifferentLength();
@@ -281,6 +277,9 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 _producer = _shop;
                 tokenId = item.id;
             }
+            // use paymentwallet
+            // TODO: Check if the product exists in metadatas (is it for sale?)
+            //if (!droplinkedBase.hasMetadata(tokenId, _producer)) revert TokenIsNotForSale(); 
             (uint _productPrice, uint _commission, ProductType _type, address _paymentWallet) = droplinkedBase.getMetadata(tokenId, _producer); // <-- would fail if the metadata is not found for that product (not set)
             if (_type == ProductType.POD && _publisher != address(0)) revert AffiliatePOD();
             _productETHPrice = (toETHPrice(_productPrice * item.amount, ratio) * newProductsPrice) / totalProductsPrice;
@@ -292,15 +291,38 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             totalIncome -= __publisherShare + __droplinkedShare;
             __producerShare -= __publisherShare + __droplinkedShare;
             // now pay the benficiaries
-            (__producerShare, totalIncome) = _payBeneficiaries(droplinkedBase.getBeneficariesList(tokenId, _shop), _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare, totalIncome);
+            uint[] memory beneficiaryHashes = droplinkedBase.getBeneficariesList(tokenId, _shop);
+            (__producerShare, totalIncome) = _payBeneficiaries(beneficiaryHashes, _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare, totalIncome);
             payable(_paymentWallet).transfer(__producerShare);
             if (droplinkedToken.getOwnerAmount(tokenId, _shop) < item.amount) revert NotEnoughTokens(tokenId, _shop);
             droplinkedToken.safeTransferFrom(_shop, msg.sender, tokenId, item.amount, "");
             // SET NEW METADATA HERE
+            droplinkedBase.setMetadata(
+                _productPrice, // TODO: the product price stays still (or can it change?)
+                _commission, // TODO: do the commission need to stay still ?! TODO
+                msg.sender,  
+                beneficiaryHashes, // TODO: the beneficiaries must change but what should i put here? 
+                _type, // type remains as is
+                tokenId, // tokenId remains as is
+                msg.sender //TODO: the payment wallet, do we need to update it?
+            );
             // the product must not be purchaseable after transfer, until the owner specifies the new price and commission & beneficiaries and paymentWallet (_type and tokenId will remain the same)
         }
         payable(droplinkedWallet).transfer(totalIncome);
         emit Purchase(memo);
+    }
+
+    function setMetadata(uint price, uint commission, Beneficiary[] memory beneficiaries, ProductType _type, uint tokenId, address paymentWallet) public{
+        if (droplinkedBase.isMetadataSet(tokenId,msg.sender)) revert CannotChangeMetata();
+        uint[] memory _beneficiaryHashes = new uint[](
+            beneficiaries.length
+        );
+        for (uint i = 0; i < beneficiaries.length; i++) {
+            _beneficiaryHashes[i] = droplinkedBase.addBeneficiary(
+                beneficiaries[i]
+            );
+        }
+        droplinkedBase.setMetadata(price, commission, msg.sender, _beneficiaryHashes, _type, tokenId, paymentWallet);
     }
 
     function _payBeneficiaries(uint[] memory beneficiaries, uint _productETHPrice, uint amount, uint ratio, uint totalProductPrice, uint newProductPrice, uint __producerShare, uint totalIncome) private returns(uint, uint){

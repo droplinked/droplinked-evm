@@ -79,7 +79,7 @@ interface IDroplinkedBase {
     function setRequestCnt(uint256 value) external;
 
     function getRequest(uint256 req_id) external view returns (Request memory);
-
+    function isMetadataSet(uint tokenId, address owner) external view returns (bool);
     function getIsRequested(
         address producer_account,
         address publisher_account,
