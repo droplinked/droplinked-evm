@@ -1,38 +1,7 @@
 //// SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
 import "../CouponManager.sol";
-
-enum ProductType {
-    DIGITAL,
-    POD,
-    PHYSICAL
-}
-
-struct Request {
-    uint256 tokenId;
-    address producer;
-    address publisher;
-    bool accepted;
-}
-struct Beneficiary{
-    bool isPercentage; 
-    uint256 value;
-    address wallet;
-}
-
-struct CouponProof {
-    uint256[2] _pA;
-    uint256[2][2] _pB;
-    uint256[2] _pC;
-    uint256[3] _pubSignals;
-    bool provided;
-}
-
-struct PurchaseData {
-    uint id;
-    uint amount;
-    bool isAffiliate;
-}
+import "../structs.sol";
 
 interface IDroplinkedBase {
     function addBeneficiary(Beneficiary calldata beneficary) external returns (uint);
@@ -96,11 +65,15 @@ interface IDroplinkedBase {
         uint256 requestId
     ) external view returns (bool);
 
-    function getRequestCnt() external view returns (uint256); // todo: find a better way
+    function getRequestCnt() external view returns (uint256); // TODO: find a better way
 
     function setAccepted(uint256 requestId, bool acc) external;
 
     function addERC20Address(address erc20contract) external;
+
+    function setIssuer(uint tokenId, address issuer, uint royalty) external;
+
+    function getIssuer(uint tokenId) external returns(Issuer memory);
 
     function removeERC20Address(address erc20contract) external;
 

@@ -2,7 +2,7 @@
 pragma solidity 0.8.18;
 
 import "./CouponVerifier.sol";
-import "./Interfaces/IDroplinkedBase.sol";
+import "./structs.sol";
 
 struct Coupon {
     bool isPercentage;

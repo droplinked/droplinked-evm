@@ -1,18 +1,16 @@
 //// SPDX-License-Identifier: MIT
 pragma solidity 0.8.18;
 import "./Interfaces/IERC20.sol";
-import "./Interfaces/IDroplinkedToken.sol";
-import "./Interfaces/IDroplinkedBase.sol";
-import "./DroplinkedBase.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./DroplinkedToken.sol";
+import "./DroplinkedBase.sol";
 import "./CouponManager.sol";
 
-// todo: support ERC20 for payment
-// todo: set new metadata for transfered NFT
+// TODO: support ERC20 for payment -> for later
+//TODO: Custom error catcher in ethersjs
 
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
@@ -31,6 +29,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error CouponCantBeApplied();
     error NotEnoughTokens(uint tokenId, address tokenOwner);
     error ERC20TransferFailed(uint amount, address receiver);
+    error ZeroPrice();
     error InvalidFromAddress();
 
     event PublishRequest(uint256 tokenId, uint256 requestId);
@@ -43,8 +42,8 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     event ERC20PaymentAdded(address tokenAddress);
     event ERC20PaymentRemoved(address removedToken);
 
-    IDroplinkedToken public droplinkedToken;
-    IDroplinkedBase public droplinkedBase;
+    DroplinkedToken public droplinkedToken;
+    DroplinkedBase public droplinkedBase;
     bool internal locked;
 
     // Polygon Mumbai: 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
@@ -63,19 +62,19 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     constructor(address _base, address _token) {
         if (_base == address(0)) {
             DroplinkedBase base = new DroplinkedBase();
-            droplinkedBase = IDroplinkedBase(address(base));
+            droplinkedBase = DroplinkedBase(address(base));
             base.setOperator(address(this));
             emit DeployedBase(address(base));
         } else {
-            droplinkedBase = IDroplinkedBase(_base);
+            droplinkedBase = DroplinkedBase(_base);
         }
         if (_token == address(0)) {
             DroplinkedToken token = new DroplinkedToken();
-            droplinkedToken = IDroplinkedToken(address(token));
+            droplinkedToken = DroplinkedToken(address(token));
             token.setOperator(address(this));
             emit DeployedToken(address(token));
         } else {
-            droplinkedToken = IDroplinkedToken(_token);
+            droplinkedToken = DroplinkedToken(_token);
         }
     }
 
@@ -101,8 +100,10 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         ProductType _type,
         address _paymentWallet,
         Beneficiary[] memory _beneficiaries,
-        bool acceptedManageWallet
+        bool acceptedManageWallet,
+        uint royalty
     ) public {
+        if (_price == 0) revert ZeroPrice();
         uint[] memory _beneficiaryHashes = new uint[](
             _beneficiaries.length
         );
@@ -121,6 +122,8 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             tokenId,
             _paymentWallet
         );
+        if (droplinkedBase.getIssuer(tokenId).issuer == address(0))
+            droplinkedBase.setIssuer(tokenId, msg.sender, royalty);
     }
 
     function publish_request(address producer_account, uint256 tokenId) public {
@@ -242,7 +245,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         (uint ratio, uint timestamp) = getLatestPrice(chainLinkRoundId);
         if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
         transferTBDValues(tbdValues, tbdReceivers);
-        uint totalIncome = msg.value; // will be updated at each transfer
+        uint remainingFunds = msg.value; // will be updated at each transfer
         uint totalProductsPrice = msg.value - toETHPrice(totalTaxAndShipping, ratio);
         uint newProductsPrice = totalProductsPrice;
         uint creditValue = 0;
@@ -253,13 +256,10 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             if (coupon.couponProducer != _shop) revert InvalidCouponProducer();
             newProductsPrice = _applyCoupon(totalProductsPrice, coupon.isPercentage, coupon.value, ratio);
             creditValue = coupon.value;
-        }
-        // we'll use newProductsPrice/totalProductsPrice as a ratio for each price from now on
-        
+        }        
         // iterate over items in cart
         for (uint i = 0; i < cartItems.length; i++){
             PurchaseData memory item = cartItems[i];
-            // the type can be affiliate or recorded
             uint _productETHPrice = 0;
             address _publisher = address(0);
             address _producer;
@@ -277,38 +277,29 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 _producer = _shop;
                 tokenId = item.id;
             }
-            // use paymentwallet
-            // TODO: Check if the product exists in metadatas (is it for sale?)
-            //if (!droplinkedBase.hasMetadata(tokenId, _producer)) revert TokenIsNotForSale(); 
             (uint _productPrice, uint _commission, ProductType _type, address _paymentWallet) = droplinkedBase.getMetadata(tokenId, _producer); // <-- would fail if the metadata is not found for that product (not set)
             if (_type == ProductType.POD && _publisher != address(0)) revert AffiliatePOD();
             _productETHPrice = (toETHPrice(_productPrice * item.amount, ratio) * newProductsPrice) / totalProductsPrice;
+            Issuer memory issuer = droplinkedBase.getIssuer(tokenId);
+            uint __royaltyShare = applyPercentage(_productETHPrice, issuer.royalty);
             __producerShare = _productETHPrice;
             uint __publisherShare = _publisher != address(0) ? applyPercentage(_productETHPrice, _commission) : 0;
             uint __droplinkedShare = applyPercentage(_productETHPrice, fee);
             payable(_publisher).transfer(__publisherShare);
             payable(droplinkedWallet).transfer(__droplinkedShare);
-            totalIncome -= __publisherShare + __droplinkedShare;
-            __producerShare -= __publisherShare + __droplinkedShare;
+            payable(issuer.issuer).transfer(__royaltyShare);
+            remainingFunds -= __publisherShare + __droplinkedShare + __royaltyShare;
+            __producerShare -= __publisherShare + __droplinkedShare + __royaltyShare;
             // now pay the benficiaries
             uint[] memory beneficiaryHashes = droplinkedBase.getBeneficariesList(tokenId, _shop);
-            (__producerShare, totalIncome) = _payBeneficiaries(beneficiaryHashes, _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare, totalIncome);
+            (__producerShare, remainingFunds) = _payBeneficiaries(beneficiaryHashes, _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare, remainingFunds);
             payable(_paymentWallet).transfer(__producerShare);
             if (droplinkedToken.getOwnerAmount(tokenId, _shop) < item.amount) revert NotEnoughTokens(tokenId, _shop);
             droplinkedToken.safeTransferFrom(_shop, msg.sender, tokenId, item.amount, "");
-            // SET NEW METADATA HERE
-            droplinkedBase.setMetadata(
-                _productPrice, // TODO: the product price stays still (or can it change?)
-                _commission, // TODO: do the commission need to stay still ?! TODO
-                msg.sender,  
-                beneficiaryHashes, // TODO: the beneficiaries must change but what should i put here? 
-                _type, // type remains as is
-                tokenId, // tokenId remains as is
-                msg.sender //TODO: the payment wallet, do we need to update it?
-            );
-            // the product must not be purchaseable after transfer, until the owner specifies the new price and commission & beneficiaries and paymentWallet (_type and tokenId will remain the same)
+            // royalty is already set for this token
+            // the product is not purchasable after transfer (because metadata is not set for it)!
         }
-        payable(droplinkedWallet).transfer(totalIncome);
+        payable(droplinkedWallet).transfer(remainingFunds);
         emit Purchase(memo);
     }
 
@@ -325,7 +316,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         droplinkedBase.setMetadata(price, commission, msg.sender, _beneficiaryHashes, _type, tokenId, paymentWallet);
     }
 
-    function _payBeneficiaries(uint[] memory beneficiaries, uint _productETHPrice, uint amount, uint ratio, uint totalProductPrice, uint newProductPrice, uint __producerShare, uint totalIncome) private returns(uint, uint){
+    function _payBeneficiaries(uint[] memory beneficiaries, uint _productETHPrice, uint amount, uint ratio, uint totalProductPrice, uint newProductPrice, uint __producerShare, uint remainingFunds) private returns(uint, uint){
         for (uint j = 0; j < beneficiaries.length; j++) {
             Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(beneficiaries[j]);
             uint __beneficiaryShare = 0;
@@ -339,13 +330,14 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 ) * newProductPrice) / totalProductPrice;
             }
             payable(_beneficiary.wallet).transfer(__beneficiaryShare);
-            totalIncome -= __beneficiaryShare;
+            remainingFunds -= __beneficiaryShare;
             __producerShare -= __beneficiaryShare;
         }
-        return (__producerShare, totalIncome);
+        return (__producerShare, remainingFunds);
     }
 
-    function withdraw() public onlyOwner {
+    // in case eth got sent to this contract or was stuck
+    function withdrawFunds() public onlyOwner {
         payable(msg.sender).transfer(address(this).balance);
     }
 }

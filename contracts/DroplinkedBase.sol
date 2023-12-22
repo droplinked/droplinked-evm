@@ -4,14 +4,15 @@ pragma solidity 0.8.18;
 import "./CouponManager.sol";
 import "./Operatable.sol";
 import "./BeneficiaryManager.sol";
-import "./Interfaces/IDroplinkedBase.sol";
+import "./structs.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     error InvalidSumOfDicount();
     error MetadataNotSet(uint tokenId, address owner);
+    error IssuerAlreadySet(uint tokenId, address attemptedIssuer);
 
-    uint public requestCnt;
+    uint private requestCnt;
     
     mapping(uint => Request) private requests;
     mapping(address => mapping(address => mapping(uint => bool))) private isRequested;
@@ -22,7 +23,10 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     mapping(uint => mapping(address => uint)) private _commissions;
     mapping(uint => ProductType) private _types;
     mapping(uint => mapping(address => uint[])) private _tokenBeneficiaries; // tokenId => (address => List[Beneficiaries])
-    //
+    
+    // issuers, each tokenId specifies a unique asset
+    mapping (uint => Issuer) private issuers; // tokenId => issuer
+
     mapping(address => bool) private erc20addresses;
     mapping(address => address) private paymentWallets;
 
@@ -64,7 +68,7 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         uint tokenId,
         address _owner
     ) external view returns (uint, uint, ProductType, address) {
-        if (_prices[tokenId][_owner] == 0) revert MetadataNotSet(tokenId, _owner); // if price == 0 then the metadata is not set and it should not be purchasable
+        if (_prices[tokenId][_owner] == 0) revert MetadataNotSet(tokenId, _owner); // if price == 0 then the metadata is not set and product is not available for sale
         return (_prices[tokenId][_owner], _commissions[tokenId][_owner], _types[tokenId], paymentWallets[_owner]);
     }
 
@@ -86,6 +90,23 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         bool value
     ) external onlyOperator {
         isRequested[producer_account][publisher_account][tokenId] = value;
+    }
+
+    function getIssuer(uint tokenId) public view returns (Issuer memory){
+        return issuers[tokenId];
+    }
+
+    function setIssuer(
+        uint tokenId,
+        address issuer,
+        uint royalty
+    ) external onlyOperator{
+        if (getIssuer(tokenId).issuer != address(0))
+            revert IssuerAlreadySet(tokenId, issuer);
+        Issuer memory _issuer;
+        _issuer.issuer = issuer;
+        _issuer.royalty = royalty;
+        issuers[tokenId] = _issuer;
     }
 
     function setPublishersRequests(
@@ -140,11 +161,11 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
         return producerRequests[producer_account][requestId];
     }
 
-    function addERC20address(address erc20contract) external onlyOperator {
+    function addERC20Address(address erc20contract) external onlyOperator {
         erc20addresses[erc20contract] = true;
     }
 
-    function removeERC20address(address erc20contract) external onlyOperator {
+    function removeERC20Address(address erc20contract) external onlyOperator {
         erc20addresses[erc20contract] = false;
     }
 

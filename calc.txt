@@ -1,0 +1,6 @@
+Sum of values: a (including value added services, not shipping and tax)
+Sum of percents: b (including commission, value added services & royalty)
+
+a + bn < n     (n - a - bn is what prodcuer get)
+--> a<n(1-b) -> a/(1-b) < n
+So product price should be at least a/(1-b) in the minting phase (product price without tax and shipping)
