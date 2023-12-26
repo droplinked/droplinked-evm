@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity 0.8.18;
-import "./Interfaces/IERC20.sol";
+import "../Interfaces/IERC20.sol";
 contract myERC20Token is IERC20 {
     function totalSupply() external pure override returns (uint) {
         return 1;

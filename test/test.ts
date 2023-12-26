@@ -1,17 +1,23 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
+import { DroplinkedOperator } from "../typechain-types";
+import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
 // TODO: Teste to be included:
 /**
- * 1. Royalty
- * 2. Value added services
+ * 1. Royalty -> 2 checks
+ * 2. Value added services -> checked their adding and keeped values
  * 3. payment
- * 4. set metadata after payment
+ * 4. set metadata after payment -> cheked with 2 tests -> Done (not checked the after payment state!)
  * 5. Coupon for payment
- * 6. Adding and removing coupons
+ * 6. Adding and removing coupons -> Done
  * 7. 
  */
-
+enum ProductType {
+    DIGITAL,
+    POD,
+    PHYSICAL
+};
 describe("Droplinked", function(){
     async function deployContract() {
         const fee = 100;
@@ -32,6 +38,32 @@ describe("Droplinked", function(){
         it("Should set the right fee", async function(){
             const {droplinked,fee} = await deployContract();
             expect(await droplinked.getFee()).to.equal(fee);
+        });
+    });
+
+    describe("Set & Update heartbeat", function(){
+        it("Should update the heartbeat with owner account", async function(){
+            const {droplinked,owner, token} = await deployContract();
+            await droplinked.connect(owner).setHeartBeat(4000);
+            expect(await token.getHeartBeat()).to.equal(4000);
+        });
+
+        it("should not update the heartbeat with other account", async function(){
+            const {droplinked,producer, token} = await deployContract();
+            await expect(droplinked.connect(producer).setHeartBeat(4000)).to.be.revertedWith("Ownable: caller is not the owner");
+        });
+    });
+
+    describe("Set & update fee", function(){
+        it("Should update the fee to given number using owner account", async function(){
+            const {droplinked,owner} = await deployContract();
+            await droplinked.connect(owner).setFee(200);
+            expect(await droplinked.getFee()).to.equal(200);
+        });
+
+        it("Should not update the fee to given number using other account", async function(){
+            const {droplinked,producer} = await deployContract();
+            await expect(droplinked.connect(producer).setFee(200)).to.be.revertedWith("Ownable: caller is not the owner");
         });
     });
 
@@ -71,14 +103,35 @@ describe("Droplinked", function(){
             expect(result[2]).to.equal(0n);
             expect(result[3]).to.equal(await producer.getAddress());            
         });
+
+        it("should set the right beneficiaries when minting", async function(){
+            const {droplinked,producer, base} = await deployContract();
+            type Beneficiary = {
+                isPercentage: boolean
+                value: number,
+                wallet: string,
+            }
+            let beneficiaries: Beneficiary[] = [];
+            // push 3 beneficiaries
+            for(let i = 0; i < 3; i++){
+                beneficiaries.push({isPercentage: false, value: i*100, wallet: await producer.getAddress()});
+            }
+            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), beneficiaries, true, 500);
+            let result = (await base.getBeneficariesList(1, await producer.getAddress()));
+            expect((await base.getBeneficiary(result[0])).value).to.equal(0);
+            expect((await base.getBeneficiary(result[1])).value).to.equal(100);
+            expect((await base.getBeneficiary(result[2])).value).to.equal(200);
+            expect((await base.getBeneficiary(result[0])).wallet).to.equal(await producer.getAddress());
+            expect((await base.getBeneficiary(result[1])).wallet).to.equal(await producer.getAddress());
+            expect((await base.getBeneficiary(result[2])).wallet).to.equal(await producer.getAddress());
+            expect((await base.getBeneficiary(result[0])).isPercentage).to.equal(false);
+            expect((await base.getBeneficiary(result[1])).isPercentage).to.equal(false);
+            expect((await base.getBeneficiary(result[2])).isPercentage).to.equal(false);
+        });
     });
 
     describe("PublishRequest", function(){
-        enum ProductType {
-            DIGITAL,
-            POD,
-            PHYSICAL
-        };
+        
         it("Should publish a request", async function(){
             const {droplinked,producer,publisher, base} = await deployContract();
             await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, producer.address, ProductType.DIGITAL, producer.address, [], true, 500);
@@ -115,11 +168,7 @@ describe("Droplinked", function(){
     });
 
     describe("CancelRequest", function(){
-        enum ProductType {
-            DIGITAL,
-            POD,
-            PHYSICAL
-        };
+        
         it("Should cancel a request", async function(){
             const {droplinked,producer,publisher, base} = await deployContract();
             await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
@@ -144,11 +193,7 @@ describe("Droplinked", function(){
     });
 
     describe("AcceptRequest", function(){
-        enum ProductType {
-            DIGITAL,
-            POD,
-            PHYSICAL
-        };
+        
         it("Should accept a request", async function(){
             const {droplinked,producer,publisher,base} = await deployContract();
             await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
@@ -165,11 +210,6 @@ describe("Droplinked", function(){
     });
 
     describe("DisapproveRequest", function(){
-        enum ProductType {
-            DIGITAL,
-            POD,
-            PHYSICAL
-        };
         it("Should disapprove a request", async function(){
             const {droplinked,producer,publisher,base} = await deployContract();
             await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
@@ -211,6 +251,116 @@ describe("Droplinked", function(){
             const erc20 = await ERC20.deploy();
             const {droplinked,base} = await deployContract();
             await expect(droplinked.addERC20Contract(await erc20.getAddress())).to.be.revertedWith("Not a valid ERC20 contract");
+        });
+    });
+
+    describe("Royalty check" , function(){
+        it("should add royalty for a product while minting", async function(){
+            const {droplinked,producer,base} = await deployContract();
+            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+            expect((await base.getIssuer(1)).royalty).to.equal(500);
+            expect((await base.getIssuer(1)).issuer).to.equal(await producer.getAddress());
+        });
+
+        it("should not update issuer info for the same product in minting", async function(){
+            const {droplinked,producer,base} = await deployContract();
+            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 600);
+            expect((await base.getIssuer(1)).royalty).to.equal(500);
+            expect((await base.getIssuer(1)).issuer).to.equal(await producer.getAddress());
+        });
+    });   
+    
+    describe("Set Metadata for purchased products", function(){
+        it("should error if we want to set metadata on a product which already have one", async function(){
+            const {droplinked,producer,publisher} = await deployContract();
+            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+            await expect(droplinked.connect(producer).setMetadata(100, 200, [], ProductType.DIGITAL, 1, await publisher.getAddress())).to.be.revertedWithCustomError(droplinked, "CannotChangeMetata");
+        });
+
+        it("should set metadata for a minted product(but through DroplinkedToken contract)", async function(){
+            const {droplinked,producer,publisher, token,base} = await deployContract();
+            await token.connect(producer).mint("ipfs://randomhash", 5000, await producer.getAddress(), true);
+            await droplinked.connect(producer).setMetadata(100, 200, [], ProductType.DIGITAL, 1, await publisher.getAddress());
+            let result = (await base.getMetadata(1, producer));
+            expect(result[0]).to.equal(100n);
+        });
+
+        it("should error if set twice metadata for a minted product(but through DroplinkedToken contract)", async function(){
+            const {droplinked,producer,publisher, token} = await deployContract();
+            await token.connect(producer).mint("ipfs://randomhash", 5000, await producer.getAddress(), true);
+            await droplinked.connect(producer).setMetadata(100, 200, [], ProductType.DIGITAL, 1, await publisher.getAddress());
+            await expect(droplinked.connect(producer).setMetadata(300, 100, [], ProductType.POD, 1, await publisher.getAddress())).to.revertedWithCustomError(droplinked, "CannotChangeMetata");
+        });
+    });
+
+    describe("Coupon", function(){
+        it("Should add a coupon", async function(){
+            const {producer,base} = await deployContract();
+            await base.connect(producer).addCoupon(41239141235, true, 400);
+            expect((await base.getCoupon(41239141235)).couponProducer).to.equal(await producer.getAddress());
+            expect((await base.getCoupon(41239141235)).value).to.equal(400);
+            expect((await base.getCoupon(41239141235)).isPercentage).to.equal(true);
+            expect((await base.getCoupon(41239141235)).secretHash).to.equal(41239141235);
+        });
+
+        it("Should not add a coupon twice", async function(){
+            const CouponManager = await ethers.getContractFactory("CouponManager");
+            const couponManager = await CouponManager.deploy();
+            await couponManager.addCoupon(41239141235, true, 400);
+            await expect(couponManager.addCoupon(41239141235, true, 400)).to.revertedWithCustomError(couponManager, "CouponAlreadyAdded");
+        });
+
+        it("should remove a coupon", async function(){
+            const {producer,base} = await deployContract();
+            await base.connect(producer).addCoupon(41239141235, true, 400);
+            await base.connect(producer).removeCoupon(41239141235);
+            expect((await base.getCoupon(41239141235)).couponProducer).to.equal("0x0000000000000000000000000000000000000000");
+            expect((await base.getCoupon(41239141235)).value).to.equal(0);
+            expect((await base.getCoupon(41239141235)).isPercentage).to.equal(false);
+            expect((await base.getCoupon(41239141235)).secretHash).to.equal(0);
+        });
+    });
+
+    // check for: price, ratio, amount, affiliate, POD, coupon, royalty, 
+    describe("Payment", function(){
+        async function recordProduct(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number){
+            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+        }
+        async function getReadyForPayment(){
+            const {producer,base, droplinked, customer, publisher, fee, owner, token} = await deployContract();
+            await recordProduct(droplinked, producer,200);
+            return {producer,base, droplinked, customer, publisher, fee, owner, token};
+        }
+        function getFakeProof(){
+            type proof = {
+                _pA: [number, number],
+                _pB: [[number, number], [number, number]],
+                _pC: [number, number],
+                _pubSignals: [number, number, number],
+                provided: boolean
+           }
+           let _proof: proof = {
+                _pA: [0,0],
+                _pB: [[0,0],[0,0]],
+                _pC: [0,0],
+                _pubSignals: [0,0,0],
+                provided: false
+            };
+            return _proof;
+        }
+        it("Should divide funds among people ( Test1: just TBD )", async function(){
+            const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues = [100];
+            let tbdReceivers = [publisher.getAddress()];
+            const publisherFunds = await ethers.provider.getBalance(await publisher.getAddress());
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [];
+            let proof = getFakeProof();
+            await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
+            const publisherFundsAfter = await ethers.provider.getBalance(await publisher.getAddress());
+            expect(publisherFundsAfter - publisherFunds).to.equal(BigInt(1e18));
         });
     });
 })

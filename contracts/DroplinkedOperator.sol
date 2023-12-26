@@ -9,8 +9,12 @@ import "./DroplinkedToken.sol";
 import "./DroplinkedBase.sol";
 import "./CouponManager.sol";
 
+import "hardhat/console.sol";
+import "./test/chainLink.sol";
+
 // TODO: support ERC20 for payment -> for later
 //TODO: Custom error catcher in ethersjs
+//TODO: remove product from sale and vice versa
 
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
@@ -31,6 +35,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error ERC20TransferFailed(uint amount, address receiver);
     error ZeroPrice();
     error InvalidFromAddress();
+    error MinterIsNotIssuer();
 
     event PublishRequest(uint256 tokenId, uint256 requestId);
     event AcceptRequest(uint256 requestId);
@@ -48,7 +53,8 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
 
     // Polygon Mumbai: 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
     // Polygon: 0xAB594600376Ec9fD91F8e885dADF0CE036862dE0
-    AggregatorV3Interface internal immutable priceFeed = AggregatorV3Interface(0xAB594600376Ec9fD91F8e885dADF0CE036862dE0);
+    //AggregatorV3Interface internal immuteable priceFeed = AggregatorV3Interface(0xAB594600376Ec9fD91F8e885dADF0CE036862dE0);
+    chainLink priceFeed = new chainLink();
     address public immutable droplinkedWallet = 0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78;
     
     // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
@@ -104,26 +110,20 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         uint royalty
     ) public {
         if (_price == 0) revert ZeroPrice();
-        uint[] memory _beneficiaryHashes = new uint[](
-            _beneficiaries.length
-        );
-        for (uint i = 0; i < _beneficiaries.length; i++) {
-            _beneficiaryHashes[i] = droplinkedBase.addBeneficiary(
-                _beneficiaries[i]
-            );
-        }
         uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver, acceptedManageWallet);
-        droplinkedBase.setMetadata(
-            _price,
-            _commission,
-            msg.sender,
-            _beneficiaryHashes,
-            _type,
-            tokenId,
-            _paymentWallet
-        );
-        if (droplinkedBase.getIssuer(tokenId).issuer == address(0))
+        if (!droplinkedBase.isMetadataSet(tokenId,msg.sender)){
+            setMetadata(
+                _price,
+                _commission,
+                _beneficiaries,
+                _type,
+                tokenId,
+                _paymentWallet);
+        }
+        if (droplinkedBase.getIssuer(tokenId).issuer == address(0)) // not reverting if != because people may want to mint more
             droplinkedBase.setIssuer(tokenId, msg.sender, royalty);
+        else if (droplinkedBase.getIssuer(tokenId).issuer != msg.sender)
+            revert MinterIsNotIssuer();
     }
 
     function publish_request(address producer_account, uint256 tokenId) public {
@@ -199,7 +199,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     }
 
     function toETHPrice(uint value, uint ratio) private pure returns (uint) {
-        return (1e24 * value) / ratio;
+        return (1e22 * value) / ratio;
     }
 
     function applyPercentage(
@@ -232,24 +232,35 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         return newProductPrice;
     }
 
-    function transferTBDValues(uint[] memory tbdValues, address[] memory tbdReceivers) private {
+    function transferTBDValues(uint[] memory tbdValues, address[] memory tbdReceivers, uint ratio) private returns(uint){
+        uint currentValue = 0;
         // transfer the tbdValues to tbdReceivers
+        // console.log("transfering funds %s", tbdReceivers.length);
         for (uint i = 0; i < tbdReceivers.length; i++) {
-            payable(tbdReceivers[i]).transfer(tbdValues[i]);
+            // console.log("transfering %s to %s", toETHPrice(tbdValues[i], ratio), tbdReceivers[i]);
+            uint value = toETHPrice(tbdValues[i], ratio);
+            currentValue += value;
+            payable(tbdReceivers[i]).transfer(value);
         }
+        return currentValue;
     }
 
     function droplinkedPurchase(address _shop, uint80 chainLinkRoundId, uint totalTaxAndShipping, uint[] memory tbdValues, address[] memory tbdReceivers, PurchaseData[] memory cartItems, CouponProof memory proof, string memory memo) public payable nonReentrant{
         // initial checks
         if (tbdReceivers.length != tbdValues.length) revert DifferentLength();
         (uint ratio, uint timestamp) = getLatestPrice(chainLinkRoundId);
-        if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
-        transferTBDValues(tbdValues, tbdReceivers);
-        uint remainingFunds = msg.value; // will be updated at each transfer
-        uint totalProductsPrice = msg.value - toETHPrice(totalTaxAndShipping, ratio);
+        // TODO: uncomment this
+        // if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
+        if (ratio == 0) revert ("Chainlink Contract not found");
+        // console.log("Contract value: %s", address(this).balance);
+        uint tbdTransferedValue = transferTBDValues(tbdValues, tbdReceivers, ratio);
+        // console.log("transfers done: TBD");
+        uint remainingFunds = msg.value - tbdTransferedValue; // will be updated at each transfer
+        uint totalProductsPrice = msg.value - toETHPrice(totalTaxAndShipping, ratio) - tbdTransferedValue;
         uint newProductsPrice = totalProductsPrice;
         uint creditValue = 0;
         uint fee = droplinkedToken.getFee();
+        // console.log("checking for proof");
         // check the coupon
         if (proof.provided){
             Coupon memory coupon = droplinkedBase.checkAndGetCoupon(proof);
@@ -257,6 +268,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             newProductsPrice = _applyCoupon(totalProductsPrice, coupon.isPercentage, coupon.value, ratio);
             creditValue = coupon.value;
         }        
+        // console.log("Checking for cart items");
         // iterate over items in cart
         for (uint i = 0; i < cartItems.length; i++){
             PurchaseData memory item = cartItems[i];
@@ -299,6 +311,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             // royalty is already set for this token
             // the product is not purchasable after transfer (because metadata is not set for it)!
         }
+        // console.log("Transferring remaining funds: %s", remainingFunds);
         payable(droplinkedWallet).transfer(remainingFunds);
         emit Purchase(memo);
     }

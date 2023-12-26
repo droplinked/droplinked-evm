@@ -13,7 +13,7 @@ struct Coupon {
 
 contract CouponManager is CouponVerifier{
     mapping (uint => Coupon) public coupons;
-
+    error CouponAlreadyAdded();
     event CouponAdded(uint secretHash, bool isPercentage, uint value, address couponProducer);
     event CouponRemoved(uint secretHash, address couponProducer);
 
@@ -22,7 +22,7 @@ contract CouponManager is CouponVerifier{
     }
 
     function addCoupon(uint _secretHash, bool _isPercentage, uint _value) external {
-        require(!couponAvailable(_secretHash), "Coupon hash already exists");
+        if(couponAvailable(_secretHash)) revert CouponAlreadyAdded();
         
         Coupon memory cp;
         cp.isPercentage = _isPercentage;
@@ -55,5 +55,9 @@ contract CouponManager is CouponVerifier{
         require(verifyProof(_proof._pA, _proof._pB, _proof._pC, _proof._pubSignals), "Proof is invalid");
     
         return coupons[_hash];
+    }
+
+    function getCoupon(uint _secretHash) external view returns(Coupon memory) {
+        return coupons[_secretHash];
     }
 }
