@@ -255,7 +255,6 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         // console.log("Contract value: %s", address(this).balance);
         uint tbdTransferedValue = transferTBDValues(tbdValues, tbdReceivers, ratio);
         // console.log("transfers done: TBD");
-        uint remainingFunds = msg.value - tbdTransferedValue; // will be updated at each transfer
         uint totalProductsPrice = msg.value - toETHPrice(totalTaxAndShipping, ratio) - tbdTransferedValue;
         uint newProductsPrice = totalProductsPrice;
         uint creditValue = 0;
@@ -268,10 +267,16 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             newProductsPrice = _applyCoupon(totalProductsPrice, coupon.isPercentage, coupon.value, ratio);
             creditValue = coupon.value;
         }        
-        // console.log("Checking for cart items");
+        console.log("Checking for cart items");
+        console.log("contract: %s", address(this).balance);
+
         // iterate over items in cart
         for (uint i = 0; i < cartItems.length; i++){
             PurchaseData memory item = cartItems[i];
+            console.log("Cart Item %s", i);
+            console.log("\t ID: %s", item.id);
+            console.log("\t Amount: %s", item.amount);
+            console.log("\t Is Affiliate: %s", item.isAffiliate);
             uint _productETHPrice = 0;
             address _publisher = address(0);
             address _producer;
@@ -289,6 +294,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 _producer = _shop;
                 tokenId = item.id;
             }
+            console.log("1");
             (uint _productPrice, uint _commission, ProductType _type, address _paymentWallet) = droplinkedBase.getMetadata(tokenId, _producer); // <-- would fail if the metadata is not found for that product (not set)
             if (_type == ProductType.POD && _publisher != address(0)) revert AffiliatePOD();
             _productETHPrice = (toETHPrice(_productPrice * item.amount, ratio) * newProductsPrice) / totalProductsPrice;
@@ -297,23 +303,35 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             __producerShare = _productETHPrice;
             uint __publisherShare = _publisher != address(0) ? applyPercentage(_productETHPrice, _commission) : 0;
             uint __droplinkedShare = applyPercentage(_productETHPrice, fee);
+            console.log("2");
             payable(_publisher).transfer(__publisherShare);
+            console.log("3");
             payable(droplinkedWallet).transfer(__droplinkedShare);
+            console.log("4");
             payable(issuer.issuer).transfer(__royaltyShare);
-            remainingFunds -= __publisherShare + __droplinkedShare + __royaltyShare;
-            __producerShare -= __publisherShare + __droplinkedShare + __royaltyShare;
+            console.log("5");
+            console.log("6");
+            __producerShare -= (__publisherShare + __droplinkedShare + __royaltyShare);
+            console.log("7");
             // now pay the benficiaries
             uint[] memory beneficiaryHashes = droplinkedBase.getBeneficariesList(tokenId, _shop);
-            (__producerShare, remainingFunds) = _payBeneficiaries(beneficiaryHashes, _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare, remainingFunds);
+            console.log("8");
+            __producerShare = _payBeneficiaries(beneficiaryHashes, _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare);
+            console.log("9");
             payable(_paymentWallet).transfer(__producerShare);
+            console.log("10");
             if (droplinkedToken.getOwnerAmount(tokenId, _shop) < item.amount) revert NotEnoughTokens(tokenId, _shop);
+            console.log("11");
             droplinkedToken.safeTransferFrom(_shop, msg.sender, tokenId, item.amount, "");
+            console.log("12");
             // royalty is already set for this token
             // the product is not purchasable after transfer (because metadata is not set for it)!
         }
         // console.log("Transferring remaining funds: %s", remainingFunds);
-        payable(droplinkedWallet).transfer(remainingFunds);
+        console.log("contract: %s", address(this).balance);
+        console.log("13");
         emit Purchase(memo);
+        console.log("14");
     }
 
     function setMetadata(uint price, uint commission, Beneficiary[] memory beneficiaries, ProductType _type, uint tokenId, address paymentWallet) public{
@@ -329,7 +347,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         droplinkedBase.setMetadata(price, commission, msg.sender, _beneficiaryHashes, _type, tokenId, paymentWallet);
     }
 
-    function _payBeneficiaries(uint[] memory beneficiaries, uint _productETHPrice, uint amount, uint ratio, uint totalProductPrice, uint newProductPrice, uint __producerShare, uint remainingFunds) private returns(uint, uint){
+    function _payBeneficiaries(uint[] memory beneficiaries, uint _productETHPrice, uint amount, uint ratio, uint totalProductPrice, uint newProductPrice, uint __producerShare) private returns(uint){
         for (uint j = 0; j < beneficiaries.length; j++) {
             Beneficiary memory _beneficiary = droplinkedBase.getBeneficiary(beneficiaries[j]);
             uint __beneficiaryShare = 0;
@@ -343,10 +361,9 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 ) * newProductPrice) / totalProductPrice;
             }
             payable(_beneficiary.wallet).transfer(__beneficiaryShare);
-            remainingFunds -= __beneficiaryShare;
             __producerShare -= __beneficiaryShare;
         }
-        return (__producerShare, remainingFunds);
+        return __producerShare;
     }
 
     // in case eth got sent to this contract or was stuck

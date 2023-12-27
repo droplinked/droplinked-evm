@@ -325,11 +325,16 @@ describe("Droplinked", function(){
     // check for: price, ratio, amount, affiliate, POD, coupon, royalty, 
     describe("Payment", function(){
         async function recordProduct(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number){
-            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+            await droplinked.connect(producer).mint("ipfs://randomhash", price, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
         }
+        async function recordProduct2(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number){
+            await droplinked.connect(producer).mint("ipfs://randomhash2", price, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+        }
+        // TODO: add beneficaries to recordedProduct as a function
         async function getReadyForPayment(){
             const {producer,base, droplinked, customer, publisher, fee, owner, token} = await deployContract();
-            await recordProduct(droplinked, producer,200);
+            await recordProduct(droplinked, producer,100);
+            await recordProduct2(droplinked, producer,100);
             return {producer,base, droplinked, customer, publisher, fee, owner, token};
         }
         function getFakeProof(){
@@ -362,5 +367,99 @@ describe("Droplinked", function(){
             const publisherFundsAfter = await ethers.provider.getBalance(await publisher.getAddress());
             expect(publisherFundsAfter - publisherFunds).to.equal(BigInt(1e18));
         });
+
+        it("Should divide funds among people ( Test2: 1 minted product without TBD )", async function(){
+            const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
+            // mitn the NFT
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            const producerFunds = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFunds = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 1,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+            await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
+            const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            // should transfer 0.99 USD to producer
+            expect(producerFundsAfter - producerFunds).to.equal(BigInt(99e16));
+            // should transfer 0.01 USD to droplinked
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(BigInt(1e18 - 99e16));
+        });
+
+        it("Should not divide funds among people ( Test3: 1 minted product with wrong tokenId without TBD )", async function(){
+            const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
+            // mitn the NFT
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 5,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+            await expect(droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")})).to.be.reverted;
+        });
+        it("Should not divide funds among people ( Test4: 1 minted product with more than valid amount without TBD )", async function(){
+            const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
+            // mitn the NFT
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 100000,
+                    id: 1,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+            await expect(droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")})).to.be.reverted;
+        });
+        
+        it("Should divide funds among people ( Test5: more than 1 minted product without TBD )", async function(){
+            const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
+            // mitn the NFT
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            const producerFunds = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFunds = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 1,
+                    isAffiliate: false
+                },
+                {
+                    amount: 1,
+                    id: 2,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+            await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("2")});
+            const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            // should transfer 0.99 USD to producer
+            expect(producerFundsAfter - producerFunds).to.equal(BigInt(99e16 * 2));
+            // should transfer 0.01 USD to droplinked
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(BigInt(2e18 - 99e16*2));
+        });
+        // TODO: check beneficiary transfers
+
     });
 })
