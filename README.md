@@ -4,10 +4,10 @@ This repository contains the droplinked's smart-contract source code for EVM cha
 ## Run tests
 To run the tests on the contract you can run the following command
 ```bash
-droplinked-evm-hardhat on   main
-> npx hardhat test test/test.ts
+npm run contract:test
+```
 
-
+```
 Droplinked
     Deployment
       ✔ Should set the right owner (2296ms)
