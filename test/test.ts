@@ -18,16 +18,21 @@ enum ProductType {
     POD,
     PHYSICAL
 };
+type Beneficiary = {
+    isPercentage: boolean; 
+    value: number;
+    wallet: string;
+}
 describe("Droplinked", function(){
     async function deployContract() {
         const fee = 100;
-        const [owner,producer,publisher,customer] = await ethers.getSigners();
+        const [owner,producer,publisher,customer, beneficiary1, beneficiary2] = await ethers.getSigners();
         const Droplinked = await ethers.getContractFactory("DroplinkedOperator");
         const droplinked = await Droplinked.deploy("0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000");
         await droplinked.waitForDeployment();
         let token = await ethers.getContractAt("DroplinkedToken", await droplinked.droplinkedToken());
         let base = await ethers.getContractAt("DroplinkedBase", await droplinked.droplinkedBase());
-        return {droplinked, owner, producer, publisher, customer, fee, token, base};
+        return {droplinked, owner, producer, publisher, customer, fee, token, base, beneficiary1, beneficiary2};
     }
 
     describe("Deployment", function(){
@@ -330,12 +335,58 @@ describe("Droplinked", function(){
         async function recordProduct2(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number){
             await droplinked.connect(producer).mint("ipfs://randomhash2", price, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
         }
+        async function recordProductPOD(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number){
+            await droplinked.connect(producer).mint("ipfs://randomhash2", price, 2300, 5000, await producer.getAddress(), ProductType.POD, await producer.getAddress(), [], true, 500);
+        }
+        async function recordWithBeneficiariesPercent(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number, beneficiary: SignerWithAddress){
+            let beneficaries: Beneficiary[] = [
+                {
+                    isPercentage: true,
+                    value: 100,
+                    wallet: await beneficiary.getAddress()
+                }
+            ];
+            await droplinked.connect(producer).mint("ipfs://randomhash3", price, 100, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), beneficaries, true, 500);
+        }
+
+        async function recordWithBeneficiariesValue(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number, beneficiary: SignerWithAddress){
+            let beneficaries: Beneficiary[] = [
+                {
+                    isPercentage: false,
+                    value: 100,
+                    wallet: await beneficiary.getAddress()
+                }
+            ];
+            await droplinked.connect(producer).mint("ipfs://randomhash4", price, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), beneficaries, true, 500);
+        }
+        async function recordWithBeneficiariesValueAndPercent(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number, beneficiary: SignerWithAddress, beneficary2: SignerWithAddress){
+            let beneficaries: Beneficiary[] = [
+                {
+                    isPercentage: false,
+                    value: 100,
+                    wallet: await beneficiary.getAddress()
+                },
+                {
+                    isPercentage: true,
+                    value: 100,
+                    wallet: await beneficary2.getAddress()
+                }
+            ];
+            await droplinked.connect(producer).mint("ipfs://randomhash5", price, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), beneficaries, true, 500);
+        }
+        function convertToUSD(price: number){
+            return BigInt(Math.floor(1e18 * price));
+        }
         // TODO: add beneficaries to recordedProduct as a function
         async function getReadyForPayment(){
-            const {producer,base, droplinked, customer, publisher, fee, owner, token} = await deployContract();
+            const {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2} = await deployContract();
             await recordProduct(droplinked, producer,100);
             await recordProduct2(droplinked, producer,100);
-            return {producer,base, droplinked, customer, publisher, fee, owner, token};
+            await recordWithBeneficiariesPercent(droplinked, producer, 100, beneficiary1); // < -- 1% beneficiary share
+            await recordWithBeneficiariesValue(droplinked, producer, 200, beneficiary1); // < -- 1$ beneficiary share, 2$ product price
+            await recordWithBeneficiariesValueAndPercent(droplinked, producer, 200, beneficiary1, beneficiary2); // < -- 1$ beneficiary1, 1% beneficiary2, 1% droplinked
+            await recordProductPOD(droplinked, producer,100);
+            return {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2};
         }
         function getFakeProof(){
             type proof = {
@@ -365,7 +416,7 @@ describe("Droplinked", function(){
             let proof = getFakeProof();
             await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
             const publisherFundsAfter = await ethers.provider.getBalance(await publisher.getAddress());
-            expect(publisherFundsAfter - publisherFunds).to.equal(BigInt(1e18));
+            expect(publisherFundsAfter - publisherFunds).to.equal(convertToUSD(1)); // <- 1$ tbd
         });
 
         it("Should divide funds among people ( Test2: 1 minted product without TBD )", async function(){
@@ -388,10 +439,8 @@ describe("Droplinked", function(){
             await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
             const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
             const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
-            // should transfer 0.99 USD to producer
-            expect(producerFundsAfter - producerFunds).to.equal(BigInt(99e16));
-            // should transfer 0.01 USD to droplinked
-            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(BigInt(1e18 - 99e16));
+            expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.99)); // <-- 0.99$ for producer
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.01)); // <-- 0.01% for droplinked
         });
 
         it("Should not divide funds among people ( Test3: 1 minted product with wrong tokenId without TBD )", async function(){
@@ -428,8 +477,27 @@ describe("Droplinked", function(){
             let proof = getFakeProof();
             await expect(droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")})).to.be.reverted;
         });
+
+        it("Should not divide funds among people ( Test5: 1 affiliate POD with without TBD )", async function(){
+            const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
+            await droplinked.connect(publisher).publish_request(await producer.getAddress(), 6);
+            await droplinked.connect(producer).approve_request(1);
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 1,
+                    isAffiliate: true
+                }
+            ];
+            let proof = getFakeProof();
+            await expect(droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")})).to.be.reverted;
+        });
         
-        it("Should divide funds among people ( Test5: more than 1 minted product without TBD )", async function(){
+        it("Should divide funds among people ( Test6: more than 1 minted product without TBD )", async function(){
             const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
             // mitn the NFT
             let _shop = await producer.getAddress();
@@ -454,12 +522,123 @@ describe("Droplinked", function(){
             await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("2")});
             const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
             const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
-            // should transfer 0.99 USD to producer
-            expect(producerFundsAfter - producerFunds).to.equal(BigInt(99e16 * 2));
-            // should transfer 0.01 USD to droplinked
-            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(BigInt(2e18 - 99e16*2));
+            expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(1.98)); //<-- 2*0.99$ for producer
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.02)); //<-- 0.02$ for droplinked
         });
-        // TODO: check beneficiary transfers
-
+        it("Should divide funds among people ( Test7: 1 minted product with one beneficiary with percentage without TBD )", async function(){
+            const {producer,base, droplinked, customer, beneficiary1} = await getReadyForPayment();
+            // mitn the NFT
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            const producerFunds = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFunds = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            const beneficaryFunds = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 3,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+            await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
+            const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
+            const beneficiaryFundsAfter = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.98)); //<-- 98% for producer
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.01)); // <-- 1% for droplinked
+            expect(beneficiaryFundsAfter - beneficaryFunds).to.equal(convertToUSD(0.01)); // <-- 1% for beneficiary
+        });
+        it("Should divide funds among people ( Test8: 1 minted product with one beneficiary with value without TBD )", async function(){
+            const {producer,base, droplinked, customer, beneficiary1} = await getReadyForPayment();
+            // mitn the NFT
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            const producerFunds = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFunds = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            const beneficaryFunds = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 4,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+            await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("2")});
+            const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
+            const beneficiaryFundsAfter = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.98)); //<-- 0.98$ for producer
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.02)); // <-- 0.02$ for droplinked
+            expect(beneficiaryFundsAfter - beneficaryFunds).to.equal(convertToUSD(1)); // <-- 1$ for beneficiary
+        });
+        it("Should divide funds among people ( Test9: 1 minted product with one beneficiary with value and another with percent without TBD )", async function(){
+            const {producer,base, droplinked, customer, beneficiary1, beneficiary2} = await getReadyForPayment();
+            // mitn the NFT
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            const producerFunds = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFunds = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            const beneficaryFunds = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const beneficary2Funds = await ethers.provider.getBalance(await beneficiary2.getAddress());
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 5,
+                    isAffiliate: false
+                }
+            ];
+            //1$ beneficiary1, 1% beneficiary2, 1% droplinked
+            let proof = getFakeProof();
+            await droplinked.connect(customer).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("2")});
+            const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
+            const beneficiaryFundsAfter = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const beneficiary2FundsAfter = await ethers.provider.getBalance(await beneficiary2.getAddress());
+            const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.96)); //<-- 0.96$ for producer
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.02)); // <-- 0.02$ for droplinked
+            expect(beneficiaryFundsAfter - beneficaryFunds).to.equal(convertToUSD(1)); // <-- 1$ for beneficiary
+            expect(beneficiary2FundsAfter - beneficary2Funds).to.equal(convertToUSD(0.02)); // <-- 0.02$ for beneficiary2
+        });
+        it("Should divide funds among people ( Test10: 1 affiliated with one beneficiary with percentage without TBD )", async function(){
+            const {producer, droplinked, customer, beneficiary1, publisher} = await getReadyForPayment();
+            // publish request
+            await droplinked.connect(publisher).publish_request(await producer.getAddress(), 3);
+            // accept request
+            await droplinked.connect(producer).approve_request(1);
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            const producerFunds = await ethers.provider.getBalance(await producer.getAddress());
+            const droplinkedFunds = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            const beneficaryFunds = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const publisherFunds = await ethers.provider.getBalance(await publisher.getAddress());
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 1,
+                    isAffiliate: true
+                }
+            ];
+            let proof = getFakeProof();
+            await droplinked.connect(customer).droplinkedPurchase(await publisher.getAddress(), chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
+            const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
+            const beneficiaryFundsAfter = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const publisherFundsAfter = await ethers.provider.getBalance(await publisher.getAddress());
+            const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            expect(publisherFundsAfter - publisherFunds).to.equal(convertToUSD(0.01)); // <-- 0.01$ for publisher
+            expect(beneficiaryFundsAfter - beneficaryFunds).to.equal(convertToUSD(0.01)); // <-- 0.01$ for beneficiary
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.01)); // <-- 0.01$ for droplinked
+            expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.97)); //<-- 0.97$ for producer
+        });
+        // TODO: Royalty
     });
 })

@@ -252,14 +252,11 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         // TODO: uncomment this
         // if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
         if (ratio == 0) revert ("Chainlink Contract not found");
-        // console.log("Contract value: %s", address(this).balance);
         uint tbdTransferedValue = transferTBDValues(tbdValues, tbdReceivers, ratio);
-        // console.log("transfers done: TBD");
         uint totalProductsPrice = msg.value - toETHPrice(totalTaxAndShipping, ratio) - tbdTransferedValue;
         uint newProductsPrice = totalProductsPrice;
         uint creditValue = 0;
         uint fee = droplinkedToken.getFee();
-        // console.log("checking for proof");
         // check the coupon
         if (proof.provided){
             Coupon memory coupon = droplinkedBase.checkAndGetCoupon(proof);
@@ -267,34 +264,34 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             newProductsPrice = _applyCoupon(totalProductsPrice, coupon.isPercentage, coupon.value, ratio);
             creditValue = coupon.value;
         }        
-        console.log("Checking for cart items");
-        console.log("contract: %s", address(this).balance);
+        // console.log("Checking for cart items");
+        // console.log("contract: %s", address(this).balance);
 
         // iterate over items in cart
         for (uint i = 0; i < cartItems.length; i++){
             PurchaseData memory item = cartItems[i];
-            console.log("Cart Item %s", i);
-            console.log("\t ID: %s", item.id);
-            console.log("\t Amount: %s", item.amount);
-            console.log("\t Is Affiliate: %s", item.isAffiliate);
+            // console.log("Cart Item %s", i);
+            // console.log("\t ID: %s", item.id);
+            // console.log("\t Amount: %s", item.amount);
+            // console.log("\t Is Affiliate: %s", item.isAffiliate);
             uint _productETHPrice = 0;
             address _publisher = address(0);
             address _producer;
             uint tokenId = 0;
             uint __producerShare = 0;
             if (item.isAffiliate){
-                if(creditValue != 0) revert CouponCantBeApplied();
                 Request memory request = droplinkedBase.getRequest(item.id);
                 if(!request.accepted) revert RequestIsNotAccepted();
+                _publisher = request.publisher;
+                if(creditValue != 0) revert CouponCantBeApplied();
                 if (_publisher != _shop) revert InvalidFromAddress();
                 _producer = request.producer;
-                _publisher = request.publisher;
                 tokenId = request.tokenId;
             } else {
                 _producer = _shop;
                 tokenId = item.id;
             }
-            console.log("1");
+            // console.log("1");
             (uint _productPrice, uint _commission, ProductType _type, address _paymentWallet) = droplinkedBase.getMetadata(tokenId, _producer); // <-- would fail if the metadata is not found for that product (not set)
             if (_type == ProductType.POD && _publisher != address(0)) revert AffiliatePOD();
             _productETHPrice = (toETHPrice(_productPrice * item.amount, ratio) * newProductsPrice) / totalProductsPrice;
@@ -303,35 +300,35 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             __producerShare = _productETHPrice;
             uint __publisherShare = _publisher != address(0) ? applyPercentage(_productETHPrice, _commission) : 0;
             uint __droplinkedShare = applyPercentage(_productETHPrice, fee);
-            console.log("2");
+            // console.log("2");
             payable(_publisher).transfer(__publisherShare);
-            console.log("3");
+            // console.log("3");
             payable(droplinkedWallet).transfer(__droplinkedShare);
-            console.log("4");
+            // console.log("4");
             payable(issuer.issuer).transfer(__royaltyShare);
-            console.log("5");
-            console.log("6");
+            // console.log("5");
+            // console.log("6");
             __producerShare -= (__publisherShare + __droplinkedShare + __royaltyShare);
-            console.log("7");
+            // console.log("7");
             // now pay the benficiaries
-            uint[] memory beneficiaryHashes = droplinkedBase.getBeneficariesList(tokenId, _shop);
-            console.log("8");
+            uint[] memory beneficiaryHashes = droplinkedBase.getBeneficariesList(tokenId, _producer);
+            // console.log("8");
             __producerShare = _payBeneficiaries(beneficiaryHashes, _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare);
-            console.log("9");
+            // console.log("9");
             payable(_paymentWallet).transfer(__producerShare);
-            console.log("10");
-            if (droplinkedToken.getOwnerAmount(tokenId, _shop) < item.amount) revert NotEnoughTokens(tokenId, _shop);
-            console.log("11");
-            droplinkedToken.safeTransferFrom(_shop, msg.sender, tokenId, item.amount, "");
-            console.log("12");
+            // console.log("10");
+            if (droplinkedToken.getOwnerAmount(tokenId, _producer) < item.amount) revert NotEnoughTokens(tokenId, _producer);
+            // console.log("11");
+            droplinkedToken.safeTransferFrom(_producer, msg.sender, tokenId, item.amount, "");
+            // console.log("12");
             // royalty is already set for this token
             // the product is not purchasable after transfer (because metadata is not set for it)!
         }
         // console.log("Transferring remaining funds: %s", remainingFunds);
-        console.log("contract: %s", address(this).balance);
-        console.log("13");
+        // console.log("contract: %s", address(this).balance);
+        // console.log("13");
         emit Purchase(memo);
-        console.log("14");
+        // console.log("14");
     }
 
     function setMetadata(uint price, uint commission, Beneficiary[] memory beneficiaries, ProductType _type, uint tokenId, address paymentWallet) public{
