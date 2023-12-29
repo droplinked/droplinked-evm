@@ -64,6 +64,41 @@ contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
             paymentWallets[_owner] = _paymentWallet;
     }
 
+    function removeMetadata(uint tokenId, address asker) external onlyOperator {
+        delete _prices[tokenId][asker];
+        delete _commissions[tokenId][asker];
+    }
+
+    function setMetadataAfterPurchase(
+        uint price,
+        uint commission,
+        address _owner,
+        uint[] memory _beneficiaries,
+        uint tokenId,
+        address _paymentWallet
+    ) external onlyOperator {
+        _prices[tokenId][_owner] = price;
+        _commissions[tokenId][_owner] = commission;
+        uint percentageSum = 0;
+        for (uint i = 0; i < _beneficiaries.length; i++) {
+            _tokenBeneficiaries[tokenId][_owner].push(_beneficiaries[i]);
+            Beneficiary memory _benef = getBeneficiary(_beneficiaries[i]);
+            if(_benef.isPercentage){
+                percentageSum += _benef.value;
+            }
+        }
+        if(percentageSum > 1e4) revert InvalidSumOfDicount();
+        if (paymentWallets[_owner] == address(0))
+            paymentWallets[_owner] = _paymentWallet;
+    }
+
+    function setProductType(
+        uint tokenId,
+        ProductType _type
+    ) external onlyOperator {
+        _types[tokenId] = _type;    
+    }
+
     function getMetadata(
         uint tokenId,
         address _owner

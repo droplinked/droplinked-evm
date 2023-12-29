@@ -112,7 +112,7 @@ contract DroplinkedToken is ERC1155, Operatable{
         uint amount,
         address receiver,
         bool accepted
-    ) external returns (uint){ // note: this function should be able to be called by anyone because we can have NFT without droplinked metadata
+    ) external onlyOperator returns (uint){ 
         bytes32 metadata_hash = keccak256(abi.encode(_uri));
         uint tokenId = tokenIdByHash[metadata_hash];
         if (tokenId == 0) {

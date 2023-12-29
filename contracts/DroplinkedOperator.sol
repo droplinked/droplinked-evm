@@ -12,9 +12,8 @@ import "./CouponManager.sol";
 import "hardhat/console.sol";
 import "./test/chainLink.sol";
 
-// TODO: support ERC20 for payment -> for later
 //TODO: Custom error catcher in ethersjs
-//TODO: remove product from sale and vice versa
+//TODO: remove product from sale and vice versa -> remove metadata
 
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
@@ -323,6 +322,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             // console.log("12");
             // royalty is already set for this token
             // the product is not purchasable after transfer (because metadata is not set for it)!
+            droplinkedBase.setProductType(tokenId, _type);
         }
         // console.log("Transferring remaining funds: %s", remainingFunds);
         // console.log("contract: %s", address(this).balance);
@@ -330,8 +330,22 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         emit Purchase(memo);
         // console.log("14");
     }
+    // price, commission, beneficiaries, ; type can't be changed
+    function setMetadataAfterPurchase(uint price, uint commission, Beneficiary[] memory beneficiaries, uint tokenId, address paymentWallet) public{
+        if (droplinkedBase.isMetadataSet(tokenId,msg.sender)) revert CannotChangeMetata();
+        if (droplinkedToken.getOwnerAmount(tokenId, msg.sender) < 1) revert NotEnoughTokens(tokenId, msg.sender); // <-- if the sender does not own any tokens
+        uint[] memory _beneficiaryHashes = new uint[](
+            beneficiaries.length
+        );
+        for (uint i = 0; i < beneficiaries.length; i++) {
+            _beneficiaryHashes[i] = droplinkedBase.addBeneficiary(
+                beneficiaries[i]
+            );
+        }
+        droplinkedBase.setMetadataAfterPurchase(price, commission, msg.sender, _beneficiaryHashes, tokenId, paymentWallet);
+    }
 
-    function setMetadata(uint price, uint commission, Beneficiary[] memory beneficiaries, ProductType _type, uint tokenId, address paymentWallet) public{
+    function setMetadata(uint price, uint commission, Beneficiary[] memory beneficiaries, ProductType _type, uint tokenId, address paymentWallet) private{
         if (droplinkedBase.isMetadataSet(tokenId,msg.sender)) revert CannotChangeMetata();
         uint[] memory _beneficiaryHashes = new uint[](
             beneficiaries.length
@@ -342,6 +356,10 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             );
         }
         droplinkedBase.setMetadata(price, commission, msg.sender, _beneficiaryHashes, _type, tokenId, paymentWallet);
+    }
+
+    function removeMetadata(uint tokenId) public{
+        droplinkedBase.removeMetadata(tokenId, msg.sender);
     }
 
     function _payBeneficiaries(uint[] memory beneficiaries, uint _productETHPrice, uint amount, uint ratio, uint totalProductPrice, uint newProductPrice, uint __producerShare) private returns(uint){

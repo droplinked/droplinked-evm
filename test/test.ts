@@ -26,13 +26,13 @@ type Beneficiary = {
 describe("Droplinked", function(){
     async function deployContract() {
         const fee = 100;
-        const [owner,producer,publisher,customer, beneficiary1, beneficiary2] = await ethers.getSigners();
+        const [owner,producer,publisher,customer, beneficiary1, beneficiary2, royaltyAcc] = await ethers.getSigners();
         const Droplinked = await ethers.getContractFactory("DroplinkedOperator");
         const droplinked = await Droplinked.deploy("0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000");
         await droplinked.waitForDeployment();
         let token = await ethers.getContractAt("DroplinkedToken", await droplinked.droplinkedToken());
         let base = await ethers.getContractAt("DroplinkedBase", await droplinked.droplinkedBase());
-        return {droplinked, owner, producer, publisher, customer, fee, token, base, beneficiary1, beneficiary2};
+        return {droplinked, owner, producer, publisher, customer, fee, token, base, beneficiary1, beneficiary2,royaltyAcc};
     }
 
     describe("Deployment", function(){
@@ -280,22 +280,12 @@ describe("Droplinked", function(){
         it("should error if we want to set metadata on a product which already have one", async function(){
             const {droplinked,producer,publisher} = await deployContract();
             await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
-            await expect(droplinked.connect(producer).setMetadata(100, 200, [], ProductType.DIGITAL, 1, await publisher.getAddress())).to.be.revertedWithCustomError(droplinked, "CannotChangeMetata");
+            await expect(droplinked.connect(producer).setMetadataAfterPurchase(100, 200, [], 1, await publisher.getAddress())).to.be.revertedWithCustomError(droplinked, "CannotChangeMetata");
         });
-
-        it("should set metadata for a minted product(but through DroplinkedToken contract)", async function(){
-            const {droplinked,producer,publisher, token,base} = await deployContract();
-            await token.connect(producer).mint("ipfs://randomhash", 5000, await producer.getAddress(), true);
-            await droplinked.connect(producer).setMetadata(100, 200, [], ProductType.DIGITAL, 1, await publisher.getAddress());
-            let result = (await base.getMetadata(1, producer));
-            expect(result[0]).to.equal(100n);
-        });
-
-        it("should error if set twice metadata for a minted product(but through DroplinkedToken contract)", async function(){
-            const {droplinked,producer,publisher, token} = await deployContract();
-            await token.connect(producer).mint("ipfs://randomhash", 5000, await producer.getAddress(), true);
-            await droplinked.connect(producer).setMetadata(100, 200, [], ProductType.DIGITAL, 1, await publisher.getAddress());
-            await expect(droplinked.connect(producer).setMetadata(300, 100, [], ProductType.POD, 1, await publisher.getAddress())).to.revertedWithCustomError(droplinked, "CannotChangeMetata");
+        it("should remove metadata", async function(){
+            const {droplinked,producer} = await deployContract();
+            await droplinked.connect(producer).mint("ipfs://randomhash", 100, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+            await expect(droplinked.connect(producer).removeMetadata(1)).not.to.reverted;
         });
     });
 
@@ -379,14 +369,14 @@ describe("Droplinked", function(){
         }
         // TODO: add beneficaries to recordedProduct as a function
         async function getReadyForPayment(){
-            const {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2} = await deployContract();
+            const {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2, royaltyAcc} = await deployContract();
             await recordProduct(droplinked, producer,100);
             await recordProduct2(droplinked, producer,100);
             await recordWithBeneficiariesPercent(droplinked, producer, 100, beneficiary1); // < -- 1% beneficiary share
             await recordWithBeneficiariesValue(droplinked, producer, 200, beneficiary1); // < -- 1$ beneficiary share, 2$ product price
             await recordWithBeneficiariesValueAndPercent(droplinked, producer, 200, beneficiary1, beneficiary2); // < -- 1$ beneficiary1, 1% beneficiary2, 1% droplinked
             await recordProductPOD(droplinked, producer,100);
-            return {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2};
+            return {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2, royaltyAcc};
         }
         function getFakeProof(){
             type proof = {
@@ -639,6 +629,42 @@ describe("Droplinked", function(){
             expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.01)); // <-- 0.01$ for droplinked
             expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.97)); //<-- 0.97$ for producer
         });
-        // TODO: Royalty
+        it("Should divide funds among people ( Test10: royalty test without TBD )", async function(){
+            const {producer,base, droplinked, customer, publisher, royaltyAcc, beneficiary1} = await getReadyForPayment();
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 3,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+            await droplinked.connect(royaltyAcc).droplinkedPurchase(_shop, chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
+            let beneficaries: Beneficiary[] = [
+                {
+                    isPercentage: true,
+                    value: 100,
+                    wallet: await beneficiary1.getAddress()
+                }
+            ];
+            await droplinked.connect(royaltyAcc).setMetadataAfterPurchase(100, 0, beneficaries, 3, await royaltyAcc.getAddress());
+            const producerFunds = await ethers.provider.getBalance(await producer.getAddress());
+            const beneficiary1Funds = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const royaltyAccFunds = await ethers.provider.getBalance(await royaltyAcc.getAddress());
+            const droplinkedFunds = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            await droplinked.connect(customer).droplinkedPurchase(await royaltyAcc.getAddress(), chainLinkRoundId, 0, tbdValues, tbdReceivers, cartItems, proof, "Hello", {value: ethers.parseEther("1")});
+            const producerFundsAfter = await ethers.provider.getBalance(await producer.getAddress());
+            const beneficiary1FundsAfter = await ethers.provider.getBalance(await beneficiary1.getAddress());
+            const royaltyAccFundsAfter = await ethers.provider.getBalance(await royaltyAcc.getAddress());
+            const droplinkedFundsAfter = await ethers.provider.getBalance("0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78");
+            expect(royaltyAccFundsAfter - royaltyAccFunds).to.equal(convertToUSD(0.93)); // <-- 0.93$ for current owner
+            expect(beneficiary1FundsAfter - beneficiary1Funds).to.equal(convertToUSD(0.01)); // <-- 0.01$ for beneficiary
+            expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.01)); // <-- 0.01$ for droplinked
+            expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.05)); //<-- 0.05$ for producer (royalty)
+        });
     });
 })
