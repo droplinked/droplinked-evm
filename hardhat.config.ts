@@ -24,6 +24,11 @@ const config: HardhatUserConfig = {
       gasPrice: 20000000000,
       accounts: [process.env.MNEMONIC as string]
     },
+    linea:{
+      url: "https://rpc.goerli.linea.build",
+      chainId: 59140,
+      accounts: [process.env.PRIVATE_KEY as string]
+    },
     HederaTest: {
       //HashIO testnet endpoint from the TESTNET_ENDPOINT variable in the project .env the file
       url: process.env.HEDERA_TESTNET_ENDPOINT,
@@ -50,7 +55,10 @@ const config: HardhatUserConfig = {
     }
   },
   etherscan:{
-    apiKey: (process.env.POLYGONSCAN_API_KEY) as string,
+    // apiKey: (process.env.POLYGON_API_KEY) as string,
+    apiKey:{
+      linea: "7DE7Q8JRVWGK5A8X57DI85FC6EYGMBR59A"//(process.env.POLYGON_API_KEY) as string
+    },
     customChains: [
       {
         network: "xrpl",
@@ -58,6 +66,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: "https://evm-sidechain.xrpl.org/api",
           browserURL: "https://evm-sidechain.xrpl.org"
+        }
+      },
+      {
+        network: "linea",
+        chainId: 59140,
+        urls: {
+          apiURL: "https://api.lineascan.build/api",
+          browserURL: "https://goerli.lineascan.build/",
         }
       }
     ]

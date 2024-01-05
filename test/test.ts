@@ -1,17 +1,11 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { DroplinkedOperator } from "../typechain-types";
+import { DroplinkedBase, DroplinkedOperator } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
 // TODO: Teste to be included:
 /**
- * 1. Royalty -> 2 checks
- * 2. Value added services -> checked their adding and keeped values
- * 3. payment
- * 4. set metadata after payment -> cheked with 2 tests -> Done (not checked the after payment state!)
- * 5. Coupon for payment
- * 6. Adding and removing coupons -> Done
- * 7. 
+ * 1. Coupon for payment
  */
 enum ProductType {
     DIGITAL,
@@ -364,10 +358,15 @@ describe("Droplinked", function(){
             ];
             await droplinked.connect(producer).mint("ipfs://randomhash5", price, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), beneficaries, true, 500);
         }
+        async function recordWithCoupon(droplinked: DroplinkedOperator, producer: SignerWithAddress, base: DroplinkedBase){
+            // price: 1$
+            // coupon: 50%
+            await base.connect(producer).addCoupon(412304, true, 100);
+            await droplinked.connect(producer).mint("ipfs://randomhash124", 100, 100, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
+        }
         function convertToUSD(price: number){
             return BigInt(Math.floor(1e18 * price));
         }
-        // TODO: add beneficaries to recordedProduct as a function
         async function getReadyForPayment(){
             const {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2, royaltyAcc} = await deployContract();
             await recordProduct(droplinked, producer,100);
@@ -376,6 +375,9 @@ describe("Droplinked", function(){
             await recordWithBeneficiariesValue(droplinked, producer, 200, beneficiary1); // < -- 1$ beneficiary share, 2$ product price
             await recordWithBeneficiariesValueAndPercent(droplinked, producer, 200, beneficiary1, beneficiary2); // < -- 1$ beneficiary1, 1% beneficiary2, 1% droplinked
             await recordProductPOD(droplinked, producer,100);
+            await recordWithCoupon(droplinked, producer, base); //token id 7 <-- 50% coupon , 1$ product -> 0.01$ droplinked, 0.49$ producer, 0.5% no need
+            // <-- 0.5$ should be payed
+            // <-- 0.05$ droplinked & 0.45$ producer
             return {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2, royaltyAcc};
         }
         function getFakeProof(){
@@ -395,6 +397,28 @@ describe("Droplinked", function(){
             };
             return _proof;
         }
+
+        function getProofFor(secretHash: number){
+            type proof = {
+                _pA: [number, number],
+                _pB: [[number, number], [number, number]],
+                _pC: [number, number],
+                _pubSignals: [number, number, number],
+                provided: boolean
+           }
+           let _proof: proof = {
+                _pA: [0,0],
+                _pB: [[0,0],[0,0]],
+                _pC: [0,0],
+                _pubSignals: [0,0,0],
+                provided: false
+            };
+            // calculate the proof here and update _proof
+            // TODO:
+            
+            return _proof;
+        }
+
         it("Should divide funds among people ( Test1: just TBD )", async function(){
             const {producer,base, droplinked, customer, publisher} = await getReadyForPayment();
             let _shop = await producer.getAddress();
@@ -666,5 +690,24 @@ describe("Droplinked", function(){
             expect(droplinkedFundsAfter - droplinkedFunds).to.equal(convertToUSD(0.01)); // <-- 0.01$ for droplinked
             expect(producerFundsAfter - producerFunds).to.equal(convertToUSD(0.05)); //<-- 0.05$ for producer (royalty)
         });
+
+        it("Should divide funds among people ( Test11: A simple recorded product with a coupon provided )", async function(){
+            const {producer,base, droplinked, customer, publisher, royaltyAcc, beneficiary1} = await getReadyForPayment();
+            let _shop = await producer.getAddress();
+            let chainLinkRoundId = 1;
+            let tbdValues: number[] = [];
+            let tbdReceivers: string[] = [];
+            let cartItems: {id: number,amount: number,isAffiliate:boolean}[] = [
+                {
+                    amount: 1,
+                    id: 7,
+                    isAffiliate: false
+                }
+            ];
+            let proof = getFakeProof();
+
+
+        });
+
     });
 })

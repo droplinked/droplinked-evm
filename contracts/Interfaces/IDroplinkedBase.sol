@@ -65,7 +65,7 @@ interface IDroplinkedBase {
         uint256 requestId
     ) external view returns (bool);
 
-    function getRequestCnt() external view returns (uint256); // TODO: find a better way
+    function getRequestCnt() external view returns (uint256); 
 
     function setAccepted(uint256 requestId, bool acc) external;
 

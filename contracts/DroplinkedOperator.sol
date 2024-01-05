@@ -9,12 +9,6 @@ import "./DroplinkedToken.sol";
 import "./DroplinkedBase.sol";
 import "./CouponManager.sol";
 
-import "hardhat/console.sol";
-import "./test/chainLink.sol";
-
-//TODO: Custom error catcher in ethersjs
-//TODO: remove product from sale and vice versa -> remove metadata
-
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
     error CannotChangeMetata();
@@ -50,10 +44,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     DroplinkedBase public droplinkedBase;
     bool internal locked;
 
-    // Polygon Mumbai: 0xd0D5e3DB44DE05E9F294BB0a3bEEaF030DE24Ada
-    // Polygon: 0xAB594600376Ec9fD91F8e885dADF0CE036862dE0
-    //AggregatorV3Interface internal immuteable priceFeed = AggregatorV3Interface(0xAB594600376Ec9fD91F8e885dADF0CE036862dE0);
-    chainLink priceFeed = new chainLink();
+    AggregatorV3Interface internal immutable priceFeed = AggregatorV3Interface(0xcCFF6C2e770Faf4Ff90A7760E00007fd32Ff9A97);
     address public immutable droplinkedWallet = 0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78;
     
     // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
@@ -233,10 +224,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
 
     function transferTBDValues(uint[] memory tbdValues, address[] memory tbdReceivers, uint ratio) private returns(uint){
         uint currentValue = 0;
-        // transfer the tbdValues to tbdReceivers
-        // console.log("transfering funds %s", tbdReceivers.length);
         for (uint i = 0; i < tbdReceivers.length; i++) {
-            // console.log("transfering %s to %s", toETHPrice(tbdValues[i], ratio), tbdReceivers[i]);
             uint value = toETHPrice(tbdValues[i], ratio);
             currentValue += value;
             payable(tbdReceivers[i]).transfer(value);
@@ -248,31 +236,23 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         // initial checks
         if (tbdReceivers.length != tbdValues.length) revert DifferentLength();
         (uint ratio, uint timestamp) = getLatestPrice(chainLinkRoundId);
-        // TODO: uncomment this
-        // if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
+        if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
         if (ratio == 0) revert ("Chainlink Contract not found");
         uint tbdTransferedValue = transferTBDValues(tbdValues, tbdReceivers, ratio);
         uint totalProductsPrice = msg.value - toETHPrice(totalTaxAndShipping, ratio) - tbdTransferedValue;
         uint newProductsPrice = totalProductsPrice;
         uint creditValue = 0;
         uint fee = droplinkedToken.getFee();
-        // check the coupon
         if (proof.provided){
             Coupon memory coupon = droplinkedBase.checkAndGetCoupon(proof);
             if (coupon.couponProducer != _shop) revert InvalidCouponProducer();
             newProductsPrice = _applyCoupon(totalProductsPrice, coupon.isPercentage, coupon.value, ratio);
             creditValue = coupon.value;
         }        
-        // console.log("Checking for cart items");
-        // console.log("contract: %s", address(this).balance);
 
         // iterate over items in cart
         for (uint i = 0; i < cartItems.length; i++){
             PurchaseData memory item = cartItems[i];
-            // console.log("Cart Item %s", i);
-            // console.log("\t ID: %s", item.id);
-            // console.log("\t Amount: %s", item.amount);
-            // console.log("\t Is Affiliate: %s", item.isAffiliate);
             uint _productETHPrice = 0;
             address _publisher = address(0);
             address _producer;
@@ -290,7 +270,6 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
                 _producer = _shop;
                 tokenId = item.id;
             }
-            // console.log("1");
             (uint _productPrice, uint _commission, ProductType _type, address _paymentWallet) = droplinkedBase.getMetadata(tokenId, _producer); // <-- would fail if the metadata is not found for that product (not set)
             if (_type == ProductType.POD && _publisher != address(0)) revert AffiliatePOD();
             _productETHPrice = (toETHPrice(_productPrice * item.amount, ratio) * newProductsPrice) / totalProductsPrice;
@@ -299,36 +278,20 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             __producerShare = _productETHPrice;
             uint __publisherShare = _publisher != address(0) ? applyPercentage(_productETHPrice, _commission) : 0;
             uint __droplinkedShare = applyPercentage(_productETHPrice, fee);
-            // console.log("2");
             payable(_publisher).transfer(__publisherShare);
-            // console.log("3");
             payable(droplinkedWallet).transfer(__droplinkedShare);
-            // console.log("4");
             payable(issuer.issuer).transfer(__royaltyShare);
-            // console.log("5");
-            // console.log("6");
             __producerShare -= (__publisherShare + __droplinkedShare + __royaltyShare);
-            // console.log("7");
-            // now pay the benficiaries
             uint[] memory beneficiaryHashes = droplinkedBase.getBeneficariesList(tokenId, _producer);
-            // console.log("8");
             __producerShare = _payBeneficiaries(beneficiaryHashes, _productETHPrice, item.amount, ratio, totalProductsPrice, newProductsPrice, __producerShare);
-            // console.log("9");
             payable(_paymentWallet).transfer(__producerShare);
-            // console.log("10");
             if (droplinkedToken.getOwnerAmount(tokenId, _producer) < item.amount) revert NotEnoughTokens(tokenId, _producer);
-            // console.log("11");
             droplinkedToken.safeTransferFrom(_producer, msg.sender, tokenId, item.amount, "");
-            // console.log("12");
             // royalty is already set for this token
             // the product is not purchasable after transfer (because metadata is not set for it)!
             droplinkedBase.setProductType(tokenId, _type);
         }
-        // console.log("Transferring remaining funds: %s", remainingFunds);
-        // console.log("contract: %s", address(this).balance);
-        // console.log("13");
         emit Purchase(memo);
-        // console.log("14");
     }
     // price, commission, beneficiaries, ; type can't be changed
     function setMetadataAfterPurchase(uint price, uint commission, Beneficiary[] memory beneficiaries, uint tokenId, address paymentWallet) public{
