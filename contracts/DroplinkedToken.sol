@@ -7,15 +7,15 @@ import "./Operatable.sol";
 
 contract DroplinkedToken is ERC1155, Operatable{
     event MintEvent(uint tokenId, address recipient, uint amount, string uri);
-    event HeartBeatUpdated(uint16 newHeartBeat);
+    event HeartBeatUpdated(uint256 newHeartBeat);
     event ManageWalletUpdated(address newManagedWallet);
     event FeeUpdated(uint newFee);
 
     uint public totalSupply;
     uint public fee;
     string public name = "Droplinked";
-    string public symbol = "DRP";
-    uint16 public heartBeat = 27;
+    string public symbol = "DROP";
+    uint256 public heartBeat = 1200;
     uint public tokenCnt;
     address public managedWallet = 0x8c906310C5F64fe338e27Bd9fEf845B286d0fc1e;
     mapping(uint => string) uris;
@@ -59,7 +59,7 @@ contract DroplinkedToken is ERC1155, Operatable{
         emit ManageWalletUpdated(_newManagedWallet);
     }
 
-    function setHeartBeat(uint16 _heartbeat) external onlyOperator {
+    function setHeartBeat(uint256 _heartbeat) external onlyOperator {
         heartBeat = _heartbeat;
         emit HeartBeatUpdated(_heartbeat);
     }
@@ -73,7 +73,7 @@ contract DroplinkedToken is ERC1155, Operatable{
         return fee;
     }
 
-    function getHeartBeat() external view returns (uint){
+    function getHeartBeat() external view returns (uint256){
         return heartBeat;
     }
 
@@ -90,6 +90,8 @@ contract DroplinkedToken is ERC1155, Operatable{
         );
         _safeBatchTransferFrom(from, to, ids, amounts, data);
     }
+
+
 
     function safeTransferFrom(
         address from,
@@ -131,5 +133,10 @@ contract DroplinkedToken is ERC1155, Operatable{
         emit URI(_uri, tokenId);
         emit MintEvent(tokenId, tx.origin, amount, _uri);
         return tokenId;
+    }
+    function droplinkedSafeBatchTransferFrom(address from, address[] memory to, uint[] memory ids, uint[] memory amounts) external {
+        for (uint i = 0; i < to.length; i++) {
+            safeTransferFrom(from, to[i], ids[i], amounts[i], "");
+        }
     }
 }

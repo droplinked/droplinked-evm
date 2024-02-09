@@ -37,3 +37,10 @@ struct Issuer{
     address issuer;
     uint royalty;
 }
+
+struct Coupon {
+    bool isPercentage;
+    uint value;
+    uint secretHash;
+    address couponProducer;
+}

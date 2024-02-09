@@ -5,7 +5,7 @@ const delay = (delayInms: number) => {
 };
 
 async function main() {
-  const droplinked = await ethers.deployContract("DroplinkedOperator", ["0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000"], {
+  const droplinked = await ethers.deployContract("DroplinkedCalculator", [], {
     value: 0,
   });
   console.log(
@@ -25,16 +25,6 @@ async function main() {
 
   await run('verify:verify', {
     address: await droplinked.getAddress(),
-    constructorArguments: ["0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000"]
-  });
-
-  await run('verify:verify', {
-    address: await droplinked.droplinkedBase(),
-    constructorArguments: []
-  });
-
-  await run('verify:verify', {
-    address: await droplinked.droplinkedToken(),
     constructorArguments: []
   });
 

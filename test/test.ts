@@ -313,6 +313,18 @@ describe("Droplinked", function(){
 
     // check for: price, ratio, amount, affiliate, POD, coupon, royalty, 
     describe("Payment", function(){
+        interface RecordOptions{
+            ipfs_hash: string,
+            price: number,
+            commission: number,
+            amount: number,
+            receiver: string,
+            type: ProductType,
+            paymentWallet: string,
+            beneficiaries: Beneficiary[],
+            acceptsManageWallet: boolean,
+            royalty: number
+        }
         async function recordProduct(droplinked: DroplinkedOperator, producer: SignerWithAddress, price: number){
             await droplinked.connect(producer).mint("ipfs://randomhash", price, 2300, 5000, await producer.getAddress(), ProductType.DIGITAL, await producer.getAddress(), [], true, 500);
         }
@@ -380,6 +392,13 @@ describe("Droplinked", function(){
             // <-- 0.05$ droplinked & 0.45$ producer
             return {producer,base, droplinked, customer, publisher, fee, owner, token, beneficiary1, beneficiary2, royaltyAcc};
         }
+
+        async function recordAndGetTokenId(droplinked: DroplinkedOperator, producer: SignerWithAddress, recordData: RecordOptions){
+            // starts at tokenId 8
+            await droplinked.connect(producer).mint(recordData.ipfs_hash, recordData.price, recordData.commission, recordData.amount, recordData.receiver, recordData.type,
+                recordData.paymentWallet, recordData.beneficiaries, recordData.acceptsManageWallet, recordData.royalty);
+        }
+
         function getFakeProof(){
             type proof = {
                 _pA: [number, number],
@@ -705,9 +724,22 @@ describe("Droplinked", function(){
                 }
             ];
             let proof = getFakeProof();
-
-
         });
 
+        it("Should divide funds among people ( Test11: A simple recorded product with a coupon provided )", async function(){
+            const {producer,base, droplinked, customer, publisher, royaltyAcc, beneficiary1} = await getReadyForPayment();
+            recordAndGetTokenId(droplinked, producer, {
+                acceptsManageWallet: true,
+                amount: 1,
+                price: 50*100,
+                beneficiaries: [],
+                commission: 0,
+                ipfs_hash: "randomIPFSHASH",
+                paymentWallet: await producer.getAddress(),
+                receiver: await producer.getAddress(),
+                royalty: 0,
+                type: ProductType.DIGITAL
+            });
+        });
     });
 })

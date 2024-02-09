@@ -4,8 +4,6 @@ pragma solidity 0.8.18;
 import "./CouponManager.sol";
 import "./Operatable.sol";
 import "./BeneficiaryManager.sol";
-import "./structs.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract DroplinkedBase is CouponManager, Operatable, BenficiaryManager {
     error InvalidSumOfDicount();

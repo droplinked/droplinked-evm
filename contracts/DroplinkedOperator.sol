@@ -7,7 +7,6 @@ import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./DroplinkedToken.sol";
 import "./DroplinkedBase.sol";
-import "./CouponManager.sol";
 
 contract DroplinkedOperator is Ownable, ReentrancyGuard {
     error AccessDenied();
@@ -39,13 +38,14 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     event Purchase(string memo);
     event ERC20PaymentAdded(address tokenAddress);
     event ERC20PaymentRemoved(address removedToken);
+    event DroplinkedWalletChanged(address newWallet);
 
     DroplinkedToken public droplinkedToken;
     DroplinkedBase public droplinkedBase;
     bool internal locked;
 
-    AggregatorV3Interface internal immutable priceFeed = AggregatorV3Interface(0xcCFF6C2e770Faf4Ff90A7760E00007fd32Ff9A97);
-    address public immutable droplinkedWallet = 0x89281F2dA10fB35c1Cf90954E1B3036C3EB3cc78;
+    AggregatorV3Interface internal immutable priceFeed = AggregatorV3Interface(0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70);
+    address public droplinkedWallet = 0x9e7849F2008ced980243B1107972684E458010e1;
     
     // Get the latest price of MATIC/USD with 8 digits shift ( the actual price is 1e-8 times the returned price )
     function getLatestPrice(uint80 roundId) internal view returns (uint, uint) {
@@ -53,6 +53,10 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             roundId
         );
         return (uint(price), timestamp);
+    }
+
+    function setDroplinkedAccount(address droplinkedAccount) external onlyOwner(){
+        droplinkedWallet = droplinkedAccount;
     }
 
     constructor(address _base, address _token) {
@@ -98,7 +102,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         Beneficiary[] memory _beneficiaries,
         bool acceptedManageWallet,
         uint royalty
-    ) public {
+    ) public returns(uint){
         if (_price == 0) revert ZeroPrice();
         uint256 tokenId = droplinkedToken.mint(_uri, amount, receiver, acceptedManageWallet);
         if (!droplinkedBase.isMetadataSet(tokenId,msg.sender)){
@@ -114,6 +118,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             droplinkedBase.setIssuer(tokenId, msg.sender, royalty);
         else if (droplinkedBase.getIssuer(tokenId).issuer != msg.sender)
             revert MinterIsNotIssuer();
+        return tokenId;
     }
 
     function publish_request(address producer_account, uint256 tokenId) public {
@@ -189,7 +194,7 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
     }
 
     function toETHPrice(uint value, uint ratio) private pure returns (uint) {
-        return (1e22 * value) / ratio;
+        return (1e24 * value) / ratio;
     }
 
     function applyPercentage(
@@ -232,14 +237,14 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
         return currentValue;
     }
 
-    function droplinkedPurchase(address _shop, uint80 chainLinkRoundId, uint totalTaxAndShipping, uint[] memory tbdValues, address[] memory tbdReceivers, PurchaseData[] memory cartItems, CouponProof memory proof, string memory memo) public payable nonReentrant{
+    function droplinkedPurchase(address _shop, uint80 chainLinkRoundId, uint[] memory tbdValues, address[] memory tbdReceivers, PurchaseData[] memory cartItems, CouponProof memory proof, string memory memo) public payable nonReentrant{
         // initial checks
         if (tbdReceivers.length != tbdValues.length) revert DifferentLength();
         (uint ratio, uint timestamp) = getLatestPrice(chainLinkRoundId);
         if (block.timestamp > timestamp && block.timestamp - timestamp > 2 * uint(droplinkedToken.getHeartBeat())) revert oldPrice();
         if (ratio == 0) revert ("Chainlink Contract not found");
         uint tbdTransferedValue = transferTBDValues(tbdValues, tbdReceivers, ratio);
-        uint totalProductsPrice = msg.value - toETHPrice(totalTaxAndShipping, ratio) - tbdTransferedValue;
+        uint totalProductsPrice = msg.value - tbdTransferedValue;
         uint newProductsPrice = totalProductsPrice;
         uint creditValue = 0;
         uint fee = droplinkedToken.getFee();
@@ -342,10 +347,5 @@ contract DroplinkedOperator is Ownable, ReentrancyGuard {
             __producerShare -= __beneficiaryShare;
         }
         return __producerShare;
-    }
-
-    // in case eth got sent to this contract or was stuck
-    function withdrawFunds() public onlyOwner {
-        payable(msg.sender).transfer(address(this).balance);
     }
 }

@@ -2,27 +2,21 @@
 pragma solidity 0.8.18;
 
 import "./CouponVerifier.sol";
+import "./Interfaces/IDroplinkedBase.sol";
 import "./structs.sol";
-
-struct Coupon {
-    bool isPercentage;
-    uint value;
-    uint secretHash;
-    address couponProducer;
-}
 
 contract CouponManager is CouponVerifier{
     mapping (uint => Coupon) public coupons;
     error CouponAlreadyAdded();
     event CouponAdded(uint secretHash, bool isPercentage, uint value, address couponProducer);
     event CouponRemoved(uint secretHash, address couponProducer);
-
+ 
     function couponAvailable(uint _secretHash) public view returns(bool) {
         return coupons[_secretHash].secretHash == _secretHash;
     }
 
     function addCoupon(uint _secretHash, bool _isPercentage, uint _value) external {
-        if(couponAvailable(_secretHash)) revert CouponAlreadyAdded();
+        if (couponAvailable(_secretHash)) revert CouponAlreadyAdded();
         
         Coupon memory cp;
         cp.isPercentage = _isPercentage;
@@ -33,7 +27,7 @@ contract CouponManager is CouponVerifier{
         
         emit CouponAdded(_secretHash, _isPercentage, _value, msg.sender);
     }
-    
+
     function removeCoupon(uint secretHash) external {
         require(couponAvailable(secretHash), "Coupon hash does not exist");
         require(coupons[secretHash].couponProducer == msg.sender, "Only producer can remove a coupon");
@@ -56,7 +50,7 @@ contract CouponManager is CouponVerifier{
     
         return coupons[_hash];
     }
-
+    
     function getCoupon(uint _secretHash) external view returns(Coupon memory) {
         return coupons[_secretHash];
     }
